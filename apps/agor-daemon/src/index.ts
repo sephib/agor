@@ -352,6 +352,12 @@ async function main() {
     config.daemon.instanceLabel = process.env.INSTANCE_LABEL;
   }
 
+  // Configure daemon URL for executor payloads (used by all services)
+  // Uses config.daemon.public_url if set (for k8s), otherwise defaults to localhost
+  const daemonUrl = config.daemon?.public_url || `http://localhost:${DAEMON_PORT}`;
+  configureDaemonUrl(daemonUrl);
+  console.log(`[Executor] Daemon URL configured: ${daemonUrl}`);
+
   // Initialize Anthropic API key (extracted to setup/credentials.ts)
   // Side effect: sets process.env.ANTHROPIC_API_KEY if found in config
   initializeAnthropicApiKey(config, process.env.ANTHROPIC_API_KEY);
@@ -558,11 +564,6 @@ async function main() {
     }
 
     console.log(`[Daemon] Using executor at: ${executorPath}`);
-
-    // Configure daemon URL for executor payloads
-    // Uses config.daemon.public_url if set (for k8s), otherwise defaults to localhost
-    const daemonUrl = config.daemon?.public_url || `http://localhost:${DAEMON_PORT}`;
-    configureDaemonUrl(daemonUrl);
 
     // =========================================================================
     // DETERMINE UNIX USER FOR EXECUTOR BASED ON unix_user_mode

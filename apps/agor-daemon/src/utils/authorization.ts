@@ -32,6 +32,7 @@ function hasMinimumRole(userRole: string | undefined, minimumRole: Role): boolea
  * Ensure the request is authenticated and has the minimum required role.
  *
  * Internal calls (params.provider is falsy) bypass authorization checks.
+ * Service accounts (_isServiceAccount) also bypass authorization checks.
  */
 export function ensureMinimumRole(
   params: AuthenticatedParams | undefined,
@@ -45,6 +46,12 @@ export function ensureMinimumRole(
 
   if (!params.user) {
     throw new NotAuthenticated('Authentication required');
+  }
+
+  // Skip authorization for service accounts (executor, etc.)
+  // biome-ignore lint/suspicious/noExplicitAny: Service account flag is added dynamically by auth strategy
+  if ((params.user as any)._isServiceAccount === true) {
+    return;
   }
 
   if (!hasMinimumRole(params.user.role, minimumRole)) {

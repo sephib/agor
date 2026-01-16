@@ -1,7 +1,20 @@
 import path from 'node:path';
+import { getDefaultConfig, loadConfigSync } from '@agor/core/config';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import viteCompression from 'vite-plugin-compression';
+
+// Load Agor config to get daemon port
+const agorConfig = (() => {
+  try {
+    return loadConfigSync();
+  } catch {
+    return getDefaultConfig();
+  }
+})();
+
+const defaults = getDefaultConfig();
+const daemonPort = agorConfig.daemon?.port || defaults.daemon?.port || 3030;
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -20,6 +33,8 @@ export default defineConfig({
   // Polyfill Node.js globals for browser compatibility
   define: {
     global: 'globalThis',
+    // Inject daemon port from config.yaml (allows frontend to respect config)
+    'import.meta.env.VITE_DAEMON_PORT': String(daemonPort),
   },
 
   // Set base path for production builds (served from /ui by daemon)
