@@ -276,9 +276,11 @@ export async function unsetConfigValue(key: string): Promise<void> {
 export async function getDaemonUrl(): Promise<string> {
   // 1. Check for explicit DAEMON_URL env var (highest priority)
   if (process.env.DAEMON_URL) {
+    console.log('[getDaemonUrl] Using DAEMON_URL from env:', process.env.DAEMON_URL);
     return process.env.DAEMON_URL;
   }
 
+  console.log('[getDaemonUrl] DAEMON_URL not in env, loading config...');
   const config = await loadConfig();
   const defaults = getDefaultConfig();
 

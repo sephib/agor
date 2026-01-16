@@ -2,14 +2,21 @@
  * Run As User - Central Unix Command Execution Utility
  *
  * Provides a unified interface for running commands as another Unix user.
- * When impersonation is needed, always uses `sudo su - $USER -c "..."` to ensure
+ * When impersonation is needed, always uses `sudo -u $USER bash -c "..."` to ensure
  * fresh Unix group memberships are loaded.
  *
- * WHY `sudo su -` INSTEAD OF `sudo -u`:
- * Unix groups are cached at login time. If a user is added to a group after a process
- * starts (e.g., daemon added to a newly-created worktree group), `sudo -u` preserves
- * the caller's cached groups. Only `sudo su -` creates a fresh login shell that
- * re-reads /etc/group.
+ * HOW `sudo -u` PROVIDES FRESH GROUP MEMBERSHIPS:
+ * When sudo switches users (via -u), it calls the initgroups() syscall which reads
+ * /etc/group at that moment, giving the target user fresh group memberships.
+ * This is different from the caller's cached groups - each sudo -u invocation
+ * gets a fresh read from /etc/group.
+ *
+ * We use `bash -c` to execute the command to ensure proper environment setup
+ * and command parsing. This works with the sudoers configuration line:
+ * `agorpg ALL=(%agor_users) NOPASSWD: ALL`
+ *
+ * SECURITY NOTE: We use `sudo -u` instead of `sudo su` to avoid needing to
+ * whitelist the /usr/bin/su binary in sudoers, which would be a security risk.
  *
  * @see context/guides/rbac-and-unix-isolation.md
  */
@@ -52,8 +59,8 @@ export interface RunAsUserOptions {
 /**
  * Run a shell command, optionally as another Unix user
  *
- * When asUser is specified, runs via `sudo -n su - $USER -c "..."` to:
- * - Get fresh Unix group memberships (login shell)
+ * When asUser is specified, runs via `sudo -n -u $USER bash -c "..."` to:
+ * - Get fresh Unix group memberships (sudo calls initgroups())
  * - Prevent password prompts (-n flag)
  * - Have proper timeout handling
  *
@@ -80,10 +87,11 @@ export function runAsUser(command: string, options: RunAsUserOptions = {}): stri
   let fullCommand: string;
 
   if (asUser) {
-    // Impersonate: use sudo su - for fresh group memberships
+    // Impersonate: use sudo -u for fresh group memberships
     // -n prevents password prompts (requires passwordless sudo configured)
+    // sudo -u calls initgroups() to get fresh group memberships from /etc/group
     const escapedCommand = escapeShellArg(command);
-    fullCommand = `sudo -n su - ${asUser} -c ${escapedCommand}`;
+    fullCommand = `sudo -n -u ${asUser} bash -c ${escapedCommand}`;
   } else {
     // No impersonation: run directly
     fullCommand = command;
@@ -194,10 +202,12 @@ export function buildSpawnArgs(
   const innerCommand =
     args.length > 0 ? `${envPrefix}${command} ${escapedArgs}` : `${envPrefix}${command}`;
 
-  // Impersonate: wrap with sudo su -
+  // Impersonate: wrap with sudo -u and bash -c
   // -n prevents password prompts
+  // bash -c ensures env vars and command are properly executed
+  // sudo -u calls initgroups() to get fresh group memberships from /etc/group
   return {
     cmd: 'sudo',
-    args: ['-n', 'su', '-', asUser, '-c', innerCommand],
+    args: ['-n', '-u', asUser, 'bash', '-c', innerCommand],
   };
 }

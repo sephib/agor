@@ -252,21 +252,47 @@ function spawnExecutorLocal(payload: Record<string, unknown>, options: SpawnExec
     asUser,
   } = options;
 
-  // Build spawn command - handles impersonation via sudo su - when asUser is set
+  // Add DAEMON_URL to env so executor doesn't try to read config.yaml
+  // When impersonated, executor can't access /home/agorpg/.agor/config.yaml
+  const daemonUrl = getDaemonUrl();
+
+  // When impersonating, only pass essential env vars (not all 77!)
+  // This keeps the sudo command manageable and avoids hitting command length limits
+  const essentialEnv: Record<string, string> = asUser
+    ? Object.fromEntries(
+        Object.entries({
+          DAEMON_URL: daemonUrl,
+          PATH: env.PATH || '/usr/local/bin:/usr/bin:/bin',
+          NODE_ENV: env.NODE_ENV,
+          HOME: env.HOME,
+          // API keys
+          ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+          OPENAI_API_KEY: env.OPENAI_API_KEY,
+          GOOGLE_API_KEY: env.GOOGLE_API_KEY,
+        }).filter(([_, v]) => v !== undefined)
+      )
+    : { ...env, DAEMON_URL: daemonUrl };
+
+  const envWithDaemonUrl = essentialEnv;
+
+  // Build spawn command - handles impersonation via sudo -u when asUser is set
   const { cmd, args } = buildSpawnArgs('node', [executorPath, '--stdin'], {
     asUser,
-    env: asUser ? env : undefined, // Only inject env when impersonating (sudo su - ignores spawn env)
+    env: asUser ? envWithDaemonUrl : undefined, // Only inject env when impersonating (sudo -u needs env passed explicitly)
   });
 
   if (asUser) {
     console.log(`${logPrefix} Spawning executor as user: ${asUser}`);
+    console.log(`${logPrefix} DAEMON_URL being passed: ${envWithDaemonUrl.DAEMON_URL}`);
+    console.log(`${logPrefix} Env vars being passed: ${Object.keys(envWithDaemonUrl).join(', ')}`);
+    console.log(`${logPrefix} Full command: ${cmd} ${args.join(' ')}`);
   }
   console.log(`${logPrefix} Spawning executor at: ${executorPath}`);
   console.log(`${logPrefix} Command: ${payload.command}`);
 
   const executorProcess = spawn(cmd, args, {
     cwd,
-    env: asUser ? undefined : { ...env }, // When impersonating, env is in the command; otherwise pass to spawn
+    env: asUser ? undefined : { ...envWithDaemonUrl }, // When impersonating, env is in the command; otherwise pass to spawn
     stdio: ['pipe', 'inherit', 'inherit'], // stdin: pipe, stdout/stderr: inherit (show in daemon logs)
     detached: false, // Don't detach - let daemon manage lifecycle
   });
