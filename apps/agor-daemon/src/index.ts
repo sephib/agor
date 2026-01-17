@@ -633,26 +633,16 @@ async function main() {
     // Add DAEMON_URL to environment so executor can connect back
     executorEnv.DAEMON_URL = daemonUrl;
 
-    // When impersonating, reduce env vars to essential ones only
-    // (impersonated executor can't read daemon user's config.yaml)
+    // When impersonating, override HOME to use impersonated user's home directory
     if (executorUnixUser) {
       // Get impersonated user's home directory from /etc/passwd
       const userHomeDir = execSync(`getent passwd "${executorUnixUser}" | cut -d: -f6`, {
         encoding: 'utf8',
       }).trim();
 
-      executorEnv = Object.fromEntries(
-        Object.entries({
-          DAEMON_URL: executorEnv.DAEMON_URL,
-          PATH: executorEnv.PATH || '/usr/local/bin:/usr/bin:/bin',
-          NODE_ENV: executorEnv.NODE_ENV,
-          HOME: userHomeDir || executorEnv.HOME, // Use impersonated user's home, fallback to daemon user's
-          // API keys
-          ANTHROPIC_API_KEY: executorEnv.ANTHROPIC_API_KEY,
-          OPENAI_API_KEY: executorEnv.OPENAI_API_KEY,
-          GOOGLE_API_KEY: executorEnv.GOOGLE_API_KEY,
-        }).filter(([_, v]) => v !== undefined)
-      );
+      // Override HOME with impersonated user's home directory
+      // Keep everything else from createUserProcessEnvironment (user env vars, API keys, etc.)
+      executorEnv.HOME = userHomeDir || executorEnv.HOME;
     }
 
     // =========================================================================
@@ -695,11 +685,6 @@ async function main() {
 
     if (executorUnixUser) {
       console.log(`[Daemon] Spawning executor as user: ${executorUnixUser}`);
-      console.log(`[Daemon] DAEMON_URL: ${executorEnv.DAEMON_URL}`);
-      console.log(
-        `[Daemon] Env vars (${Object.keys(executorEnv).length}): ${Object.keys(executorEnv).join(', ')}`
-      );
-      console.log(`[Daemon] Full command: ${cmd} ${args.join(' ')}`);
     } else {
       console.log(`[Daemon] Spawning executor as current user (no impersonation)`);
     }
