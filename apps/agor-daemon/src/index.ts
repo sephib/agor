@@ -501,8 +501,8 @@ async function main() {
 
   // Wire up custom session methods for Feathers/WebSocket executor architecture
   sessionsService.setExecuteHandler(async (sessionId, data, params) => {
-    // Import spawn and path utilities
-    const { spawn } = await import('node:child_process');
+    // Import spawn, execSync and path utilities
+    const { spawn, execSync } = await import('node:child_process');
     const path = await import('node:path');
     const { fileURLToPath } = await import('node:url');
 
@@ -628,20 +628,46 @@ async function main() {
     const userId = (params as AuthenticatedParams).user?.user_id as
       | import('@agor/core/types').UserID
       | undefined;
-    const executorEnv = await createUserProcessEnvironment(userId, db);
+    let executorEnv = await createUserProcessEnvironment(userId, db);
+
+    // Add DAEMON_URL to environment so executor can connect back
+    executorEnv.DAEMON_URL = daemonUrl;
+
+    // When impersonating, reduce env vars to essential ones only
+    // (impersonated executor can't read daemon user's config.yaml)
+    if (executorUnixUser) {
+      // Get impersonated user's home directory from /etc/passwd
+      const userHomeDir = execSync(`getent passwd "${executorUnixUser}" | cut -d: -f6`, {
+        encoding: 'utf8',
+      }).trim();
+
+      executorEnv = Object.fromEntries(
+        Object.entries({
+          DAEMON_URL: executorEnv.DAEMON_URL,
+          PATH: executorEnv.PATH || '/usr/local/bin:/usr/bin:/bin',
+          NODE_ENV: executorEnv.NODE_ENV,
+          HOME: userHomeDir || executorEnv.HOME, // Use impersonated user's home, fallback to daemon user's
+          // API keys
+          ANTHROPIC_API_KEY: executorEnv.ANTHROPIC_API_KEY,
+          OPENAI_API_KEY: executorEnv.OPENAI_API_KEY,
+          GOOGLE_API_KEY: executorEnv.GOOGLE_API_KEY,
+        }).filter(([_, v]) => v !== undefined)
+      );
+    }
 
     // =========================================================================
     // PHASE 4: JSON-OVER-STDIN WITH IMPERSONATION AT SPAWN
     //
     // Impersonation happens at spawn time using buildSpawnArgs():
-    // - When asUser is set, spawns via `sudo su - $asUser -c 'node executor --stdin'`
+    // - When asUser is set, spawns via `sudo -u $asUser bash -c 'node executor --stdin'`
     // - Executor runs directly as target user with fresh group memberships
     // - No "node calling node" indirection
     //
     // Benefits:
     // - Single spawn, not node-within-node
-    // - Fresh group memberships (login shell via `su -`)
+    // - Fresh group memberships (sudo -u calls initgroups())
     // - k8s compatible (can use pod security context instead)
+    // - Security: Uses sudo -u (not sudo su) to avoid whitelisting /usr/bin/su
     // =========================================================================
 
     // Build JSON payload for executor (Phase 2 --stdin mode)
@@ -661,16 +687,19 @@ async function main() {
       },
     };
 
-    // Build spawn command - handles impersonation via sudo su - when executorUnixUser is set
+    // Build spawn command - handles impersonation via sudo -u when executorUnixUser is set
     const { cmd, args } = buildSpawnArgs('node', [executorPath, '--stdin'], {
       asUser: executorUnixUser || undefined,
       env: executorUnixUser ? executorEnv : undefined, // Only inject env when impersonating
     });
 
     if (executorUnixUser) {
+      console.log(`[Daemon] Spawning executor as user: ${executorUnixUser}`);
+      console.log(`[Daemon] DAEMON_URL: ${executorEnv.DAEMON_URL}`);
       console.log(
-        `[Daemon] Spawning executor as user: ${executorUnixUser} (${Object.keys(executorEnv).length} env vars)`
+        `[Daemon] Env vars (${Object.keys(executorEnv).length}): ${Object.keys(executorEnv).join(', ')}`
       );
+      console.log(`[Daemon] Full command: ${cmd} ${args.join(' ')}`);
     } else {
       console.log(`[Daemon] Spawning executor as current user (no impersonation)`);
     }
