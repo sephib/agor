@@ -45,6 +45,9 @@ const execAsync = promisify(exec);
 
 /**
  * Execute a shell command
+ *
+ * NOTE: Commands from UnixGroupCommands already include `sudo -n` where needed.
+ * This function simply executes the command string as-is.
  */
 async function runCommand(
   command: string,
@@ -63,6 +66,9 @@ async function runCommand(
 
 /**
  * Execute a command and check if it succeeds (returns true/false)
+ *
+ * NOTE: Commands from UnixGroupCommands already include `sudo -n` where needed.
+ * This function simply executes the command string as-is.
  */
 async function checkCommand(command: string): Promise<boolean> {
   try {
@@ -502,8 +508,8 @@ export async function handleUnixSyncUser(
     // Ensure user exists
     const userExists = await checkCommand(`id ${unixUsername} > /dev/null 2>&1`);
     if (!userExists) {
-      // Create user with home directory
-      await runCommand(`useradd -m -s /bin/bash ${unixUsername}`);
+      // Create user with home directory (requires sudo)
+      await runCommand(`sudo -n useradd -m -s /bin/bash ${unixUsername}`);
       console.log(`[unix.sync-user] Created Unix user ${unixUsername}`);
     }
 

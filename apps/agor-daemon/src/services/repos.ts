@@ -15,6 +15,7 @@ import {
   extractSlugFromUrl,
   isValidGitUrl,
   isValidSlug,
+  isWorktreeRbacEnabled,
   PAGINATION,
   parseAgorYml,
   resolveUserEnvironment,
@@ -454,6 +455,11 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
         userId || 'anonymous'
       );
 
+      // Check if Unix group isolation should be initialized
+      const rbacEnabled = isWorktreeRbacEnabled();
+      const { getDaemonUser } = await import('@agor/core/config');
+      const daemonUser = getDaemonUser();
+
       spawnExecutorFireAndForget(
         {
           command: 'git.worktree.add',
@@ -469,6 +475,11 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
             branch: data.ref,
             sourceBranch: data.sourceBranch,
             createBranch: data.createBranch,
+            // Unix group isolation (only when RBAC is enabled)
+            initUnixGroup: rbacEnabled,
+            othersAccess: worktree.others_fs_access || 'read', // Default to read access
+            daemonUser,
+            repoUnixGroup: repo.unix_group,
           },
         },
         { logPrefix: `[ReposService.createWorktree ${data.name}]` }
