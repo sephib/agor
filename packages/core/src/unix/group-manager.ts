@@ -219,7 +219,8 @@ export const UnixGroupCommands = {
       // Set primary group ownership (visible in ls -la)
       `sudo -n chgrp -R ${groupName} "${path}"`,
       // Set setgid bit on directories only (new files inherit group ownership)
-      `sudo -n find "${path}" -type d -exec chmod g+s {} +`,
+      // Note: find runs without sudo (just traversing), chmod inside -exec uses sudo
+      `find "${path}" -type d -exec sudo -n chmod g+s {} +`,
       // ACL: owner gets full access
       `sudo -n setfacl -R -m u::rwX "${path}"`,
       // ACL: group gets full access (rwX = rw for files, rwx for dirs)
