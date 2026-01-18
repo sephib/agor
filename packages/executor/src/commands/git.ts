@@ -340,7 +340,8 @@ export async function handleGitWorktreeAdd(
           worktreePath,
           othersAccess,
           client,
-          payload.params.daemonUser
+          payload.params.daemonUser,
+          payload.params.creatorUnixUsername
         );
         console.log(`[git.worktree.add] Unix group initialized: ${unixGroup}`);
 

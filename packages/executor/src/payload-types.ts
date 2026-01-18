@@ -247,6 +247,9 @@ export const GitWorktreeAddPayloadSchema = BasePayloadSchema.extend({
 
     /** Repo Unix group name (for fixing .git/worktrees permissions) */
     repoUnixGroup: z.string().optional(),
+
+    /** Creator's Unix username to add to the worktree group (initial owner) */
+    creatorUnixUsername: z.string().optional(),
   }),
 });
 

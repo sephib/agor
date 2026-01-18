@@ -629,7 +629,8 @@ export async function initializeWorktreeGroup(
   worktreePath: string,
   othersAccess: 'none' | 'read' | 'write',
   client: AgorClient,
-  daemonUser?: string
+  daemonUser?: string,
+  creatorUnixUsername?: string
 ): Promise<string> {
   const groupName = generateWorktreeGroupName(worktreeId as WorktreeID);
 
@@ -655,6 +656,17 @@ export async function initializeWorktreeGroup(
     if (!inGroup) {
       await runCommand(UnixGroupCommands.addUserToGroup(daemonUser, groupName));
       console.log(`[unix] Added daemon user ${daemonUser} to group ${groupName}`);
+    }
+  }
+
+  // Add creator to group if provided (worktree owner gets access)
+  if (creatorUnixUsername) {
+    const inGroup = await checkCommand(
+      UnixGroupCommands.isUserInGroup(creatorUnixUsername, groupName)
+    );
+    if (!inGroup) {
+      await runCommand(UnixGroupCommands.addUserToGroup(creatorUnixUsername, groupName));
+      console.log(`[unix] Added creator ${creatorUnixUsername} to group ${groupName}`);
     }
   }
 

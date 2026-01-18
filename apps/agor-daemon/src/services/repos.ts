@@ -417,10 +417,23 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
     )) as Worktree;
 
     // Add creating user as owner of the worktree
+    let creatorUnixUsername: string | undefined;
     if (userId) {
       const worktreeRepo = new WorktreeRepository(this.db);
       await worktreeRepo.addOwner(worktree.worktree_id, userId);
       console.log(`✓ Added user ${userId.substring(0, 8)} as owner of worktree ${worktree.name}`);
+
+      // Fetch creator's Unix username for group assignment
+      try {
+        const usersService = this.app.service('users');
+        const creator = await usersService.get(userId);
+        creatorUnixUsername = creator.unix_username || undefined;
+        if (creatorUnixUsername) {
+          console.log(`✓ Creator Unix username: ${creatorUnixUsername}`);
+        }
+      } catch (_error) {
+        console.warn(`⚠️  Could not fetch Unix username for user ${userId.substring(0, 8)}`);
+      }
     }
 
     if (data.boardId) {
@@ -480,6 +493,7 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
             othersAccess: worktree.others_fs_access || 'read', // Default to read access
             daemonUser,
             repoUnixGroup: repo.unix_group,
+            creatorUnixUsername, // Creator will be added to worktree group
           },
         },
         { logPrefix: `[ReposService.createWorktree ${data.name}]` }
