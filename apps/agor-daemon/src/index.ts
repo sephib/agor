@@ -1688,23 +1688,9 @@ async function main() {
                   `[RBAC] Added creator ${creatorId.substring(0, 8)} as owner of worktree ${worktree.worktree_id.substring(0, 8)}`
                 );
 
-                // Unix Integration: Fire-and-forget sync to executor
-                // The executor will handle group creation, user membership, and permissions
-                if (worktreeRbacEnabled && jwtSecret) {
-                  const serviceToken = createServiceToken(jwtSecret);
-                  spawnExecutorFireAndForget(
-                    {
-                      command: 'unix.sync-worktree',
-                      sessionToken: serviceToken,
-                      daemonUrl: getDaemonUrl(),
-                      params: {
-                        worktreeId: worktree.worktree_id,
-                        daemonUser: config.daemon?.unix_user,
-                      },
-                    },
-                    { logPrefix: '[Executor/worktree.create]' }
-                  );
-                }
+                // NOTE: unix.sync-worktree is NOT spawned here to avoid race conditions.
+                // git.worktree.add executor handles Unix group creation synchronously.
+                // unix.sync-worktree is only used when owners are added/removed AFTER creation.
 
                 return context;
               },
