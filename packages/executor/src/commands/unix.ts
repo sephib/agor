@@ -529,6 +529,38 @@ export async function handleUnixSyncUser(
       console.log(`[unix.sync-user] Added ${unixUsername} to ${AGOR_USERS_GROUP}`);
     }
 
+    // Configure git safe.directory for worktrees (if requested by daemon)
+    // This prevents "dubious ownership" errors when user runs git commands
+    // in worktrees owned by the daemon user (only needed when unix impersonation is enabled)
+    if (payload.params.configureGitSafeDirectory) {
+      try {
+        const worktreesPattern = '/var/lib/agor/home/agorpg/.agor/worktrees/*/*';
+
+        // Check if safe.directory is already configured (idempotent)
+        let existingEntries: string[] = [];
+        try {
+          const checkCmd = `sudo -u ${unixUsername} git config --global --get-all safe.directory`;
+          const { stdout } = await execAsync(checkCmd);
+          existingEntries = stdout ? stdout.split('\n').filter(Boolean) : [];
+        } catch {
+          // Config doesn't exist yet, that's fine
+        }
+
+        if (!existingEntries.includes(worktreesPattern)) {
+          // Add wildcard safe.directory for all worktrees
+          await runCommand(
+            `sudo -u ${unixUsername} git config --global --add safe.directory '${worktreesPattern}'`
+          );
+          console.log(`[unix.sync-user] Configured git safe.directory for ${unixUsername}`);
+        } else {
+          console.log(`[unix.sync-user] git safe.directory already configured for ${unixUsername}`);
+        }
+      } catch (error) {
+        // Non-fatal - log warning and continue
+        console.warn(`[unix.sync-user] Failed to configure git safe.directory:`, error);
+      }
+    }
+
     // Sync password if provided
     if (payload.params.password) {
       // Use chpasswd with stdin for security (password not in process list)

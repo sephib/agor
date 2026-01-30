@@ -433,6 +433,22 @@ export function isWorktreeRbacEnabled(): boolean {
   }
 }
 
+/**
+ * Check if Unix user impersonation is enabled
+ *
+ * Returns true when unix_user_mode is set to anything other than 'simple'
+ * (i.e., 'insulated', 'opportunistic', or 'strict')
+ */
+export function isUnixImpersonationEnabled(): boolean {
+  try {
+    const config = loadConfigSync();
+    const mode = config.execution?.unix_user_mode;
+    return mode !== undefined && mode !== 'simple';
+  } catch {
+    return false;
+  }
+}
+
 // =============================================================================
 // Data Home Path Resolution
 // =============================================================================

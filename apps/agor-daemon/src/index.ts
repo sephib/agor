@@ -13,7 +13,12 @@ import { patchConsole } from '@agor/core/utils/logger';
 
 patchConsole();
 
-import { createUserProcessEnvironment, loadConfig, type UnknownJson } from '@agor/core/config';
+import {
+  createUserProcessEnvironment,
+  isUnixImpersonationEnabled,
+  loadConfig,
+  type UnknownJson,
+} from '@agor/core/config';
 import { buildCorsConfig } from './setup/cors.js';
 import { initializeAnthropicApiKey } from './setup/credentials.js';
 import { initializeDatabase } from './setup/database.js';
@@ -1962,6 +1967,7 @@ async function main() {
               params: {
                 userId: user.user_id,
                 password: data?.password, // Pass through for password sync
+                configureGitSafeDirectory: isUnixImpersonationEnabled(), // Configure git when impersonating
               },
             },
             { logPrefix: '[Executor/user.create]' }
@@ -1996,6 +2002,7 @@ async function main() {
               params: {
                 userId: user.user_id,
                 password: data?.password, // Pass through for password sync
+                configureGitSafeDirectory: isUnixImpersonationEnabled(), // Configure git when impersonating
               },
             },
             { logPrefix: '[Executor/user.patch]' }

@@ -416,6 +416,9 @@ export const UnixSyncUserPayloadSchema = BasePayloadSchema.extend({
 
     /** Also delete home directory when deleting user */
     deleteHome: z.boolean().optional(),
+
+    /** If true, configure git safe.directory for this user (needed when unix impersonation is enabled) */
+    configureGitSafeDirectory: z.boolean().optional(),
   }),
 });
 
