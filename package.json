@@ -39,7 +39,6 @@
   "devDependencies": {
     "@biomejs/biome": "^2.2.6",
     "@google-analytics/admin": "^9.0.1",
-    "baseline-browser-mapping": "^2.9.19",
     "husky": "^9.1.7",
     "knip": "^5.66.2",
     "lint-staged": "^16.2.5",
