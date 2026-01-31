@@ -26,6 +26,7 @@ import {
   getWorktreePermissionMode,
   REPO_GIT_PERMISSION_MODE,
   UnixGroupCommands,
+  UnixUserCommands,
 } from '@agor/core/unix';
 import type {
   ExecutorResult,
@@ -495,8 +496,8 @@ export async function handleUnixSyncUser(
 
         // Delete the user
         const deleteCmd = payload.params.deleteHome
-          ? `userdel -r ${unixUsername}`
-          : `userdel ${unixUsername}`;
+          ? UnixUserCommands.deleteUserWithHome(unixUsername)
+          : UnixUserCommands.deleteUser(unixUsername);
         await runCommand(deleteCmd);
         console.log(`[unix.sync-user] Deleted Unix user ${unixUsername}`);
       }
@@ -508,8 +509,8 @@ export async function handleUnixSyncUser(
     // Ensure user exists
     const userExists = await checkCommand(`id ${unixUsername} > /dev/null 2>&1`);
     if (!userExists) {
-      // Create user with home directory (requires sudo)
-      await runCommand(`sudo -n useradd -m -s /bin/bash ${unixUsername}`);
+      // Create user with home directory
+      await runCommand(UnixUserCommands.createUser(unixUsername));
       console.log(`[unix.sync-user] Created Unix user ${unixUsername}`);
     }
 

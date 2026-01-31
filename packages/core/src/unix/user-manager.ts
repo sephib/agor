@@ -124,7 +124,7 @@ export const UnixUserCommands = {
     username: string,
     shell: string = AGOR_DEFAULT_SHELL,
     homeBase: string = AGOR_HOME_BASE
-  ) => `useradd -m -d "${homeBase}/${username}" -s "${shell}" "${username}"`,
+  ) => `sudo -n useradd -m -d "${homeBase}/${username}" -s "${shell}" "${username}"`,
 
   /**
    * Create user with specific UID/GID
@@ -144,7 +144,7 @@ export const UnixUserCommands = {
     homeBase: string = AGOR_HOME_BASE
   ) => {
     const gidArg = gid !== undefined ? `-g ${gid}` : '';
-    return `useradd -m -d "${homeBase}/${username}" -s "${shell}" -u ${uid} ${gidArg} "${username}"`;
+    return `sudo -n useradd -m -d "${homeBase}/${username}" -s "${shell}" -u ${uid} ${gidArg} "${username}"`;
   },
 
   /**
@@ -153,7 +153,7 @@ export const UnixUserCommands = {
    * @param username - Unix username to delete
    * @returns Command string
    */
-  deleteUser: (username: string) => `userdel "${username}"`,
+  deleteUser: (username: string) => `sudo -n userdel "${username}"`,
 
   /**
    * Get command array for setting Unix user password via chpasswd
@@ -195,7 +195,7 @@ export const UnixUserCommands = {
    * @param username - Unix username to delete
    * @returns Command string
    */
-  deleteUserWithHome: (username: string) => `userdel -r "${username}"`,
+  deleteUserWithHome: (username: string) => `sudo -n userdel -r "${username}"`,
 
   /**
    * Lock a Unix user account (disable login)
@@ -203,7 +203,7 @@ export const UnixUserCommands = {
    * @param username - Unix username
    * @returns Command string
    */
-  lockUser: (username: string) => `usermod -L "${username}"`,
+  lockUser: (username: string) => `sudo -n usermod -L "${username}"`,
 
   /**
    * Unlock a Unix user account
@@ -211,7 +211,7 @@ export const UnixUserCommands = {
    * @param username - Unix username
    * @returns Command string
    */
-  unlockUser: (username: string) => `usermod -U "${username}"`,
+  unlockUser: (username: string) => `sudo -n usermod -U "${username}"`,
 
   /**
    * Get user's UID
@@ -241,7 +241,7 @@ export const UnixUserCommands = {
    * Create directory with proper ownership
    *
    * Returns an array of commands to be executed sequentially.
-   * Each command should be run with sudo separately (no sh -c wrapper needed).
+   * Commands include sudo -n and can be run directly.
    *
    * @param path - Directory path to create
    * @param username - Owner username
@@ -257,9 +257,9 @@ export const UnixUserCommands = {
   ): string[] => {
     const grp = group || username;
     return [
-      `mkdir -p "${path}"`,
-      `chown "${username}:${grp}" "${path}"`,
-      `chmod ${mode} "${path}"`,
+      `sudo -n mkdir -p "${path}"`,
+      `sudo -n chown "${username}:${grp}" "${path}"`,
+      `sudo -n chmod ${mode} "${path}"`,
     ];
   },
 
@@ -276,8 +276,8 @@ export const UnixUserCommands = {
   setupWorktreesDir: (username: string, homeBase: string = AGOR_HOME_BASE): string[] => {
     const worktreesDir = `${homeBase}/${username}/${AGOR_WORKTREES_DIR}`;
     return [
-      `mkdir -p "${worktreesDir}"`,
-      `chown -R "${username}:${username}" "${homeBase}/${username}/agor"`,
+      `sudo -n mkdir -p "${worktreesDir}"`,
+      `sudo -n chown -R "${username}:${username}" "${homeBase}/${username}/agor"`,
     ];
   },
 } as const;

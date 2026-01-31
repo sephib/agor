@@ -25,6 +25,9 @@ importers:
       '@google-analytics/admin':
         specifier: ^9.0.1
         version: 9.0.1
+      baseline-browser-mapping:
+        specifier: ^2.9.19
+        version: 2.9.19
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -4310,6 +4313,10 @@ packages:
 
   baseline-browser-mapping@2.8.25:
     resolution: {integrity: sha512-2NovHVesVF5TXefsGX1yzx1xgr7+m9JQenvz6FQY3qd+YXkKkYiv+vTCc7OriP9mcDZpTC5mAOYN4ocd29+erA==}
+    hasBin: true
+
+  baseline-browser-mapping@2.9.19:
+    resolution: {integrity: sha512-ipDqC8FrAl/76p2SSWKSI+H9tFwm7vYqXQrItCuiVPt26Km0jS+NzSsBWAaBusvSbQcfJG+JitdMm+wZAgTYqg==}
     hasBin: true
 
   bcryptjs@2.4.3:
@@ -13496,6 +13503,8 @@ snapshots:
   base64id@2.0.0: {}
 
   baseline-browser-mapping@2.8.25: {}
+
+  baseline-browser-mapping@2.9.19: {}
 
   bcryptjs@2.4.3: {}
 
