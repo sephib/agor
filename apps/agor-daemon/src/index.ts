@@ -2159,6 +2159,39 @@ async function main() {
       ],
     },
     after: {
+      get: [
+        async (context) => {
+          // Regenerate MCP token for fetched session (deterministic, no DB storage)
+          if (config.daemon?.mcpEnabled === false) {
+            return context;
+          }
+
+          const { generateSessionToken } = await import('./mcp/tokens.js');
+          const session = context.result as Session;
+          const userId = session.created_by || 'anonymous';
+
+          const jwtSecret = app.settings.authentication?.secret;
+          if (!jwtSecret) {
+            console.error('❌ JWT secret not configured - cannot generate MCP token');
+            return context;
+          }
+
+          const mcpToken = generateSessionToken(
+            userId as import('@agor/core/types').UserID,
+            session.session_id,
+            jwtSecret
+          );
+
+          console.log(
+            `🔄 Regenerated MCP token for session ${session.session_id.substring(0, 8)}: ${mcpToken.substring(0, 16)}...`
+          );
+
+          // Add token to result (not stored in DB, regenerated on-demand)
+          context.result = { ...session, mcp_token: mcpToken };
+
+          return context;
+        },
+      ],
       create: [
         async (context) => {
           // Skip MCP setup if MCP server is disabled
@@ -2166,25 +2199,31 @@ async function main() {
             return context;
           }
 
-          // Generate MCP session token for this session
+          // Generate MCP session token for this session (deterministic JWT)
           const { generateSessionToken } = await import('./mcp/tokens.js');
           const session = context.result as Session;
           const userId = session.created_by || 'anonymous';
 
+          // Get JWT secret from app settings
+          const jwtSecret = app.settings.authentication?.secret;
+          if (!jwtSecret) {
+            console.error('❌ JWT secret not configured - cannot generate MCP token');
+            return context;
+          }
+
           const mcpToken = generateSessionToken(
             userId as import('@agor/core/types').UserID,
-            session.session_id
+            session.session_id,
+            jwtSecret
           );
 
           console.log(
             `🎫 MCP token for session ${session.session_id.substring(0, 8)}: ${mcpToken.substring(0, 16)}...`
           );
 
-          // Store token in session record
-          await app.service('sessions').patch(session.session_id, {
-            mcp_token: mcpToken,
-          });
-          console.log(`💾 Stored MCP token in session record`);
+          // No need to store token in database - it's deterministic!
+          // Token can be regenerated on demand using same inputs.
+          console.log(`✨ Using deterministic MCP token (no DB storage needed)`);
 
           // Note: We no longer auto-attach global MCP servers to sessions.
           // Instead, getMcpServersForSession() will automatically provide ALL
