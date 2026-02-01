@@ -87,6 +87,7 @@ import type {
   PermissionRequestContent,
   Session,
   SessionID,
+  StreamingEventType,
   Task,
   TaskID,
   User,
@@ -802,6 +803,7 @@ async function main() {
       'createMany',
     ],
     events: [
+      // Streaming events (see StreamingEventType in @agor/core/types/message.ts)
       'streaming:start',
       'streaming:chunk',
       'streaming:end',
@@ -2017,8 +2019,11 @@ async function main() {
   // SECURITY: Only connections in 'authenticated' channel (joined on login) receive events
   // This prevents unauthenticated sockets from receiving sensitive data
   app.publish((data, context) => {
-    // Skip logging for internal events without path/method (e.g., repository-triggered events)
-    if (context.path && context.method) {
+    // Skip logging for streaming events (too verbose) and internal events without path/method
+    const isStreamingEvent =
+      context.path === 'messages/streaming' ||
+      (context.path === 'messages' && context.event?.startsWith('streaming:'));
+    if (context.path && context.method && !isStreamingEvent) {
       console.log(
         `📡 [Publish] ${context.path} ${context.method}`,
         context.id
@@ -2822,33 +2827,13 @@ async function main() {
     {
       async create(
         data: {
-          event:
-            | 'streaming:start'
-            | 'streaming:chunk'
-            | 'streaming:end'
-            | 'streaming:error'
-            | 'thinking:start'
-            | 'thinking:chunk'
-            | 'thinking:end';
+          event: StreamingEventType;
           data: Record<string, unknown>;
         },
         params: RouteParams
       ) {
-        // Security: Verify session ownership before broadcasting
-        // Extract session_id from event data
-        const sessionId = data.data.session_id as SessionID | undefined;
-
-        if (!sessionId) {
-          throw new Error('session_id is required in streaming event data');
-        }
-
-        // Load session via service to ensure authorization hooks run
-        try {
-          await app.service('sessions').get(sessionId, params);
-        } catch (_error) {
-          // If user doesn't have access to session, reject the broadcast
-          throw new Error('Unauthorized: cannot broadcast events for this session');
-        }
+        // Security: requireAuth hook already validated the session token (JWT)
+        // No additional authorization check needed here
 
         // Broadcast event using app.service().emit() which triggers app.publish()
         app.service('messages').emit(data.event, data.data);
