@@ -39,6 +39,29 @@ import { mapPermissionMode } from './permission-mapper.js';
 import { extractGeminiTokenUsage } from './usage.js';
 
 /**
+ * Safely stringify an object, handling circular references
+ * Uses a WeakSet to track seen objects and replaces circular refs with a descriptive string
+ */
+function safeStringify(obj: unknown): string {
+  const seen = new WeakSet();
+
+  return JSON.stringify(obj, (key, value) => {
+    // Handle non-object values normally
+    if (typeof value !== 'object' || value === null) {
+      return value;
+    }
+
+    // Detect circular references
+    if (seen.has(value)) {
+      return '[Circular Reference]';
+    }
+
+    seen.add(value);
+    return value;
+  });
+}
+
+/**
  * GeminiClient with internal config property exposed
  * The SDK doesn't expose this in types, but we need it for executeToolCall()
  * Note: config is private in GeminiClient, so we use unknown cast
@@ -394,16 +417,17 @@ export class GeminiPromptService {
                 : response;
 
             // Sanitize response to remove circular references (common with file system tools)
-            // JSON.parse(JSON.stringify()) handles circular refs by throwing, so catch and stringify
+            // JSON.parse(JSON.stringify()) handles circular refs by throwing, so catch and stringify safely
             let sanitizedOutput = responseOutput;
             try {
               sanitizedOutput = JSON.parse(JSON.stringify(responseOutput));
             } catch (_circularError) {
-              // If circular reference detected, convert to string
+              // If circular reference detected, use safe stringify that handles circular refs
               console.warn(
-                `[Gemini Loop] Tool ${toolCall.name} response has circular reference, converting to string`
+                `[Gemini Loop] Tool ${toolCall.name} response has circular reference, using safe stringify`
               );
-              sanitizedOutput = String(responseOutput);
+              // Parse the safe stringified version to ensure it's a proper JSON object
+              sanitizedOutput = JSON.parse(safeStringify(responseOutput));
             }
 
             functionResponseParts.push({
@@ -415,10 +439,12 @@ export class GeminiPromptService {
           } catch (error) {
             console.error(`[Gemini Loop] Error executing tool ${toolCall.name}:`, error);
             // On error, create a function response part with the error
+            // Use safe serialization for error objects as they may have circular refs
+            const errorMessage = error instanceof Error ? error.message : String(error);
             functionResponseParts.push({
               functionResponse: {
                 name: toolCall.name,
-                response: { error: String(error) },
+                response: { error: errorMessage },
               },
             } as Part);
           }
