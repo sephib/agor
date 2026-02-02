@@ -13,6 +13,7 @@ const sourceManifests = [
   'packages/core/package.json',
   'apps/agor-cli/package.json',
   'apps/agor-daemon/package.json',
+  'packages/executor/package.json',
 ];
 
 const skipDeps = new Set(['@agor/core']);
