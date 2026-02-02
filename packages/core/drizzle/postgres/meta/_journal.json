@@ -73,7 +73,7 @@
       "breakpoints": true
     },
     {
-      "idx": 11,
+      "idx": 10,
       "version": "7",
       "when": 1738468000000,
       "tag": "0011_backfill_worktree_others_can",
