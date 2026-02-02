@@ -54,7 +54,7 @@ export default class DbStatus extends Command {
         this.log(
           `${chalk.yellow('⚠')} No migrations table found. Run ${chalk.cyan('agor db migrate')} to initialize.`
         );
-        return;
+        process.exit(0);
       }
 
       // Query Drizzle's tracking table
@@ -71,7 +71,7 @@ export default class DbStatus extends Command {
 
       if (rows.length === 0) {
         this.log('No migrations applied yet');
-        return;
+        process.exit(0);
       }
 
       this.log(chalk.bold('\nApplied migrations:\n'));
@@ -85,6 +85,9 @@ export default class DbStatus extends Command {
       });
 
       this.log(`\n${chalk.bold(`Total: ${rows.length} migration(s)`)}`);
+
+      // Force exit to close database connections (postgres-js keeps connections open)
+      process.exit(0);
     } catch (error) {
       this.error(
         `Failed to get migration status: ${error instanceof Error ? error.message : String(error)}`
