@@ -6,7 +6,7 @@
 
 import type { Session, UUID } from '@agor/core/types';
 import { SessionStatus } from '@agor/core/types';
-import { and, eq, like, or, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, inArray, isNotNull, like, or, sql } from 'drizzle-orm';
 import { formatShortId, generateId } from '../../lib/ids';
 import type { Database } from '../client';
 import { deleteFrom, insert, select, update } from '../database-wrapper';
@@ -464,7 +464,7 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
    * @returns Array of accessible sessions
    */
   async findAccessibleSessions(userId: UUID): Promise<Session[]> {
-    const rows = await select(this.db)
+    const rows = await select(this.db, getTableColumns(sessions))
       .from(sessions)
       .innerJoin(worktrees, eq(sessions.worktree_id, worktrees.worktree_id))
       .leftJoin(
@@ -475,10 +475,10 @@ export class SessionRepository implements BaseRepository<Session, Partial<Sessio
         )
       )
       .where(
-        sql`(
-          ${worktreeOwners.user_id} IS NOT NULL
-          OR ${worktrees.others_can} IN ('view', 'prompt', 'all')
-        )`
+        or(
+          isNotNull(worktreeOwners.user_id),
+          inArray(worktrees.others_can, ['view', 'prompt', 'all'])
+        )
       )
       .all();
 

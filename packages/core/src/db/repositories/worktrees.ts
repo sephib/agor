@@ -5,7 +5,7 @@
  */
 
 import type { UUID, Worktree, WorktreeID } from '@agor/core/types';
-import { and, eq, inArray, like, sql } from 'drizzle-orm';
+import { and, eq, getTableColumns, inArray, isNotNull, like, or, sql } from 'drizzle-orm';
 import { formatShortId, generateId } from '../../lib/ids';
 import type { Database } from '../client';
 import { deleteFrom, insert, select, update } from '../database-wrapper';
@@ -94,8 +94,8 @@ export class WorktreeRepository implements BaseRepository<Worktree, Partial<Work
       archived_at: worktree.archived_at ? new Date(worktree.archived_at) : null,
       archived_by: worktree.archived_by ?? null,
       filesystem_status: worktree.filesystem_status ?? null,
-      // RBAC fields (explicit null to ensure they're included in updates)
-      others_can: worktree.others_can ?? null,
+      // RBAC fields (default 'view' for others_can matches schema default)
+      others_can: worktree.others_can ?? 'view',
       others_fs_access: worktree.others_fs_access ?? null,
       unix_group: worktree.unix_group ?? null,
       data: {
@@ -403,7 +403,7 @@ export class WorktreeRepository implements BaseRepository<Worktree, Partial<Work
    * @returns Array of accessible worktrees
    */
   async findAccessibleWorktrees(userId: UUID): Promise<Worktree[]> {
-    const rows = await select(this.db)
+    const rows = await select(this.db, getTableColumns(worktrees))
       .from(worktrees)
       .leftJoin(
         worktreeOwners,
@@ -413,10 +413,10 @@ export class WorktreeRepository implements BaseRepository<Worktree, Partial<Work
         )
       )
       .where(
-        sql`(
-          ${worktreeOwners.user_id} IS NOT NULL
-          OR ${worktrees.others_can} IN ('view', 'prompt', 'all')
-        )`
+        or(
+          isNotNull(worktreeOwners.user_id),
+          inArray(worktrees.others_can, ['view', 'prompt', 'all'])
+        )
       )
       .all();
 
