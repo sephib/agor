@@ -543,10 +543,19 @@ export async function setupQuery(
           }
 
           try {
-            const headers = await resolveMCPAuthHeaders(server.auth);
+            // Pass mcpUrl for OAuth token cache lookup
+            const headers = await resolveMCPAuthHeaders(server.auth, server.url);
             if (headers && transport !== 'stdio') {
               serverConfig.headers = headers;
               console.log(`     🔐 Added Authorization header for ${server.name}`);
+            } else if (server.auth?.type === 'oauth' && transport !== 'stdio') {
+              // OAuth server but no token - warn user they need to authenticate
+              console.warn(
+                `   ⚠️  MCP server "${server.name}" requires OAuth authentication but no valid token found`
+              );
+              console.warn(
+                `      💡 Go to Settings → MCP Servers → ${server.name} → Test Authentication to authenticate`
+              );
             }
           } catch (error) {
             console.warn(

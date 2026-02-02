@@ -693,13 +693,24 @@ export const mcpServers = sqliteTable(
 
         // Authentication config (for HTTP/SSE transports)
         auth?: {
-          type: 'none' | 'bearer' | 'jwt';
+          type: 'none' | 'bearer' | 'jwt' | 'oauth';
           // Bearer token
           token?: string;
           // JWT config
           api_url?: string;
           api_token?: string;
           api_secret?: string;
+          // OAuth 2.0 config
+          oauth_token_url?: string;
+          oauth_client_id?: string;
+          oauth_client_secret?: string;
+          oauth_scope?: string;
+          oauth_grant_type?: string;
+          // OAuth 2.1 runtime tokens (obtained via browser flow)
+          oauth_access_token?: string;
+          oauth_token_expires_at?: number; // Unix timestamp in milliseconds
+          oauth_refresh_token?: string;
+          // Common
           insecure?: boolean;
         };
 
