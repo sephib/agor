@@ -196,6 +196,47 @@ Agor diverges here: you're not limited to one agent. You can have a `personal_as
 
 The architectural difference is subtle but meaningful: instead of one agent with keys to everything, you have *structured access* through git repos with proper credential management and Unix-level isolation underneath.
 
+### Self-Improvement: Building Your Own Agent Loop
+
+One of OpenClaw's most compelling features is self-improvement. Ask it to build a new skill and start using it? It does. Ask it to improve its own operating model? It can. The agent modifies itself based on what you need.
+
+But here's what makes OpenClaw special: **it comes with a complete agent framework baked in.** On first run, it asks for a name. It maintains a `SOUL.md` file defining its personality and communication style. It has a sophisticated memory system:
+
+- `MEMORY.md` for long-term curated facts, decisions, and preferences
+- `memory/YYYY-MM-DD.md` for daily logs and running context
+- Vector search with hybrid BM25 for semantic + keyword recall
+- Auto-flush before context compaction to preserve important information
+- Task tracking through `taskr` for persistent todo management
+
+This isn't just plumbing. It's a complete "agent loop" architecture that gives OpenClaw persistent identity and self-awareness across sessions.
+
+**Agor doesn't have this framework baked in.** What it has instead are the building blocks to construct your own.
+
+When I read about OpenClaw's self-improvement, I thought: "Agor can totally do this." And I spent last weekend proving it out. But I wasn't just replicating OpenClaw's capabilities. I was building the framework itself.
+
+The `personal_assistant` repo pattern gives you a workspace where an agent can evolve its own instructions, build new capabilities, and improve its workflows:
+
+- Create your own `SOUL.md` defining agent personality
+- Build a filesystem-backed memory system (MEMORY.md, daily logs, whatever structure you want)
+- Write prompts that get scheduled to run every 30 minutes (or whatever cadence makes sense)
+- Give the agent tools to modify its own instruction files and commit changes to git
+
+The difference is **you design the loop**. Agor provides:
+- Git worktrees (isolated workspace with version control)
+- Scheduler (recurring prompts at any interval)
+- SDK policies (control what tools the agent can use)
+- MCP integration (connect to any capability)
+
+You bring the framework. Some developers will prefer this. You're not constrained by OpenClaw's opinionated architecture. You can build a daily log system, a weekly review system, a continuous self-improvement loop, whatever matches your workflow.
+
+But let's be honest: **OpenClaw's baked-in framework is a huge convenience.** You get a working agent loop out of the box. With Agor, you're building it yourself.
+
+I'm actively working on sharing my agent loop framework. The results from the weekend POC are promising. But it's not "install and go" like OpenClaw. It's "here are the primitives, go build."
+
+The upside? **Every piece of your agent loop lives in git.** Your SOUL.md, your memory system, your scheduled prompts, your self-improvement logic. All version controlled, reviewable, forkable. You can iterate on the framework itself. Share it as a template repo. Let agents improve their own loop architecture.
+
+OpenClaw gives you a working agent. Agor gives you the tools to build one exactly how you want it.
+
 ---
 
 ## The MCP Bridge
