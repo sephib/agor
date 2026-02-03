@@ -35,6 +35,7 @@ import type {
   Worktree,
 } from '@agor/core/types';
 import { DrizzleService } from '../adapters/drizzle';
+import { resolveGitImpersonationForUser } from '../utils/git-impersonation.js';
 import { getDaemonUrl, spawnExecutorFireAndForget } from '../utils/spawn-executor.js';
 
 /**
@@ -424,6 +425,9 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
       const { getDaemonUser } = await import('@agor/core/config');
       const daemonUser = getDaemonUser();
 
+      // Resolve Unix user for impersonation (handles simple/insulated/strict modes)
+      const asUser = userId ? await resolveGitImpersonationForUser(this.db, userId) : undefined;
+
       spawnExecutorFireAndForget(
         {
           command: 'git.worktree.add',
@@ -447,7 +451,10 @@ export class ReposService extends DrizzleService<Repo, Partial<Repo>, RepoParams
             creatorUnixUsername, // Creator will be added to worktree group
           },
         },
-        { logPrefix: `[ReposService.createWorktree ${data.name}]` }
+        {
+          logPrefix: `[ReposService.createWorktree ${data.name}]`,
+          asUser, // Run as resolved user (fresh groups via sudo -u)
+        }
       );
     } else {
       console.error('Session token service not initialized, cannot spawn executor');

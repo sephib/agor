@@ -19,6 +19,7 @@ import {
   loadConfig,
   type UnknownJson,
 } from '@agor/core/config';
+import type { UnixUserMode } from '@agor/core/unix';
 import { buildCorsConfig } from './setup/cors.js';
 import { initializeAnthropicApiKey } from './setup/credentials.js';
 import { initializeDatabase } from './setup/database.js';
@@ -724,10 +725,7 @@ async function main() {
       buildSpawnArgs,
     } = await import('@agor/core/unix');
 
-    const unixUserMode = (config.execution?.unix_user_mode ?? 'simple') as
-      | 'simple'
-      | 'insulated'
-      | 'strict';
+    const unixUserMode = (config.execution?.unix_user_mode ?? 'simple') as UnixUserMode;
     const configExecutorUser = config.execution?.executor_unix_user;
     const sessionUnixUser = session.unix_username;
 

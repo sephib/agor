@@ -25,6 +25,7 @@ import type {
 import { spawnEnvironmentCommand } from '@agor/core/unix';
 import { getNextRunTime, validateCron } from '@agor/core/utils/cron';
 import { DrizzleService } from '../adapters/drizzle';
+import { resolveGitImpersonationForWorktree } from '../utils/git-impersonation.js';
 import { getDaemonUrl, spawnExecutor } from '../utils/spawn-executor.js';
 
 /**
@@ -228,6 +229,9 @@ export class WorktreesService extends DrizzleService<Worktree, Partial<Worktree>
     if (deleteFromFilesystem) {
       console.log(`🗑️  Spawning executor to remove worktree from filesystem: ${worktree.path}`);
 
+      // Resolve Unix user for impersonation (handles simple/insulated/strict modes)
+      const asUser = await resolveGitImpersonationForWorktree(this.db, worktree);
+
       // Generate session token for executor authentication
       const userId = (params as AuthenticatedParams | undefined)?.user?.user_id as
         | UserID
@@ -253,6 +257,7 @@ export class WorktreesService extends DrizzleService<Worktree, Partial<Worktree>
             },
             {
               logPrefix: `[WorktreesService.remove ${worktree.name}]`,
+              asUser, // Run as resolved user (fresh groups via sudo -u)
             }
           );
         })
@@ -312,6 +317,10 @@ export class WorktreesService extends DrizzleService<Worktree, Partial<Worktree>
 
     if (filesystemAction === 'cleaned') {
       console.log(`🧹 Spawning executor to clean worktree filesystem: ${worktree.path}`);
+
+      // Resolve Unix user for impersonation (handles simple/insulated/strict modes)
+      const asUser = await resolveGitImpersonationForWorktree(this.db, worktree);
+
       appWithToken.sessionTokenService
         ?.generateToken('worktree-clean', userId || 'anonymous')
         .then((sessionToken) => {
@@ -326,6 +335,7 @@ export class WorktreesService extends DrizzleService<Worktree, Partial<Worktree>
             },
             {
               logPrefix: `[WorktreesService.clean ${worktree.name}]`,
+              asUser, // Run as resolved user (fresh groups via sudo -u)
             }
           );
         })
@@ -337,6 +347,10 @@ export class WorktreesService extends DrizzleService<Worktree, Partial<Worktree>
         });
     } else if (filesystemAction === 'deleted') {
       console.log(`🗑️  Spawning executor to delete worktree from filesystem: ${worktree.path}`);
+
+      // Resolve Unix user for impersonation (handles simple/insulated/strict modes)
+      const asUser = await resolveGitImpersonationForWorktree(this.db, worktree);
+
       appWithToken.sessionTokenService
         ?.generateToken('worktree-delete', userId || 'anonymous')
         .then((sessionToken) => {
@@ -353,6 +367,7 @@ export class WorktreesService extends DrizzleService<Worktree, Partial<Worktree>
             },
             {
               logPrefix: `[WorktreesService.delete ${worktree.name}]`,
+              asUser, // Run as resolved user (fresh groups via sudo -u)
             }
           );
         })
