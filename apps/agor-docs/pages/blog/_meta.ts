@@ -1,4 +1,5 @@
 export default {
+  openclaw: 'Agor vs. OpenClaw (ClawdBot)',
   announcement: 'Agor Announcement',
   'agor-platform': 'Agor Platform',
   'making-of-agor': 'Making of Agor',
