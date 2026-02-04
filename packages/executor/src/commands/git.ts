@@ -36,6 +36,7 @@ import { createExecutorClient } from '../services/feathers-client.js';
 import type { CommandOptions } from './index.js';
 import {
   fixWorktreeGitDirPermissions,
+  fixWorktreeGitDirPermissionsBasic,
   initializeRepoGroup,
   initializeWorktreeGroup,
 } from './unix.js';
@@ -417,6 +418,7 @@ export async function handleGitWorktreeAdd(
     console.log(`[git.worktree.add] Worktree created at ${worktreePath}`);
 
     // Initialize Unix group for worktree isolation (if requested)
+    // Note: initUnixGroup is explicitly set by daemon based on isWorktreeRbacEnabled()
     let unixGroup: string | undefined;
     if (payload.params.initUnixGroup && worktreeId) {
       try {
@@ -445,7 +447,22 @@ export async function handleGitWorktreeAdd(
           error instanceof Error ? error.message : String(error)
         );
       }
+    } else if (!payload.params.initUnixGroup) {
+      // RBAC is explicitly disabled - set basic permissions for .git/worktrees/<name>/
+      // This ensures git operations work even without Unix group isolation
+      try {
+        console.log(
+          `[git.worktree.add] RBAC disabled, setting basic permissions for .git/worktrees/${worktreeName}`
+        );
+        await fixWorktreeGitDirPermissionsBasic(repoPath, worktreeName);
+      } catch (error) {
+        console.error(
+          `[git.worktree.add] Failed to set basic .git/worktrees permissions:`,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
     }
+    // else: initUnixGroup is true but worktreeId is missing - skip both paths (this shouldn't happen)
 
     // Render environment command templates (after Unix group creation if applicable)
     // Templates should be rendered regardless of RBAC status, but GID will only be available
