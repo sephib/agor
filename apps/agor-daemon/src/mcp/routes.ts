@@ -1480,12 +1480,54 @@ export function setupMCPRoutes(app: Application): void {
           const currentSha = await getGitState(worktree.path);
           const currentRef = await getCurrentBranch(worktree.path);
 
-          // Determine permission mode (default or user-specified)
+          // Determine permission mode
+          // Priority: explicit param > user defaults > system defaults
           const { getDefaultPermissionMode } = await import('@agor/core/types');
           const { mapPermissionMode } = await import('@agor/core/utils/permission-mode-mapper');
           const agenticTool = args.agenticTool as AgenticToolName;
-          const requestedMode = args.permissionMode || getDefaultPermissionMode(agenticTool);
+
+          // Check user's default_agentic_config for this tool
+          const userToolDefaults = user?.default_agentic_config?.[agenticTool];
+          const requestedMode =
+            args.permissionMode ||
+            userToolDefaults?.permissionMode ||
+            getDefaultPermissionMode(agenticTool);
           const permissionMode = mapPermissionMode(requestedMode, agenticTool);
+
+          // Build permission config (including Codex-specific settings if applicable)
+          const permissionConfig: Record<string, unknown> = {
+            mode: permissionMode,
+            allowedTools: [],
+          };
+
+          // Apply Codex-specific defaults if creating a Codex session
+          if (
+            agenticTool === 'codex' &&
+            userToolDefaults?.codexSandboxMode &&
+            userToolDefaults?.codexApprovalPolicy
+          ) {
+            permissionConfig.codex = {
+              sandboxMode: userToolDefaults.codexSandboxMode,
+              approvalPolicy: userToolDefaults.codexApprovalPolicy,
+              networkAccess: userToolDefaults.codexNetworkAccess,
+            };
+          }
+
+          // Build model config (if user has defaults for this tool and a model is specified)
+          let modelConfig: Record<string, unknown> | undefined = undefined;
+          if (userToolDefaults?.modelConfig?.model) {
+            modelConfig = {
+              mode: userToolDefaults.modelConfig.mode || 'alias',
+              model: userToolDefaults.modelConfig.model,
+              updated_at: new Date().toISOString(),
+              thinkingMode: userToolDefaults.modelConfig.thinkingMode,
+              manualThinkingTokens: userToolDefaults.modelConfig.manualThinkingTokens,
+            };
+          }
+
+          // Determine MCP server IDs to attach
+          // Priority: explicit param > user defaults > empty array
+          const mcpServerIds = args.mcpServerIds || userToolDefaults?.mcpServerIds || [];
 
           // Create session
           const sessionData: Record<string, unknown> = {
@@ -1496,10 +1538,8 @@ export function setupMCPRoutes(app: Application): void {
             description: args.description,
             created_by: context.userId,
             unix_username: user.unix_username,
-            permission_config: {
-              mode: permissionMode,
-              allowedTools: [],
-            },
+            permission_config: permissionConfig,
+            ...(modelConfig && { model_config: modelConfig }),
             contextFiles: args.contextFiles || [],
             git_state: {
               ref: currentRef,
@@ -1514,9 +1554,9 @@ export function setupMCPRoutes(app: Application): void {
           const session = await app.service('sessions').create(sessionData, baseServiceParams);
           console.log(`✅ Session created: ${session.session_id.substring(0, 8)}`);
 
-          // Attach MCP servers if specified
-          if (args.mcpServerIds && Array.isArray(args.mcpServerIds)) {
-            for (const mcpServerId of args.mcpServerIds) {
+          // Attach MCP servers (from explicit param or user defaults)
+          if (mcpServerIds && mcpServerIds.length > 0) {
+            for (const mcpServerId of mcpServerIds) {
               await app.service('session-mcp-servers').create(
                 {
                   session_id: session.session_id,
@@ -1525,7 +1565,7 @@ export function setupMCPRoutes(app: Application): void {
                 baseServiceParams
               );
             }
-            console.log(`✅ Attached ${args.mcpServerIds.length} MCP servers`);
+            console.log(`✅ Attached ${mcpServerIds.length} MCP servers`);
           }
 
           // Execute initial prompt if provided

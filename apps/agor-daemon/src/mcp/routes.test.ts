@@ -198,6 +198,46 @@ describeIntegration('MCP Tools - Session Tools', () => {
     expect(result).toHaveProperty('taskId');
     expect(result.note).toBe('Prompt added to existing session and execution started.');
   });
+
+  it('agor_sessions_create honors user default permission mode', async () => {
+    // Get current user to check their defaults
+    const currentUser = await callMCPTool('agor_users_get_current');
+
+    // Set user defaults for claude-code
+    await callMCPTool('agor_users_update_current', {
+      default_agentic_config: {
+        'claude-code': {
+          permissionMode: 'bypassPermissions',
+        },
+      },
+    });
+
+    // Get a worktree to create session in
+    const worktrees = await callMCPTool('agor_worktrees_list', { limit: 1 });
+
+    if (worktrees.data.length === 0) {
+      console.log('No worktrees found, skipping test');
+      return;
+    }
+
+    const worktreeId = worktrees.data[0].worktree_id;
+
+    // Create session WITHOUT specifying permissionMode (should use user default)
+    const result = await callMCPTool('agor_sessions_create', {
+      worktreeId,
+      agenticTool: 'claude-code',
+      title: 'Test User Defaults Session',
+    });
+
+    // Verify that the session inherited user's default permissionMode
+    expect(result.session).toHaveProperty('session_id');
+    expect(result.session.permission_config?.mode).toBe('bypassPermissions');
+
+    // Restore original user preferences
+    await callMCPTool('agor_users_update_current', {
+      default_agentic_config: currentUser.default_agentic_config,
+    });
+  });
 });
 
 describeIntegration('MCP Tools - Repository Tools', () => {
