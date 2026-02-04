@@ -6,7 +6,7 @@
  */
 
 import { PAGINATION } from '@agor/core/config';
-import { type Database, SessionRepository } from '@agor/core/db';
+import { type Database, SessionRepository, type SessionWithLastMessage } from '@agor/core/db';
 import type { Application } from '@agor/core/feathers';
 import type { Paginated, QueryParams, Session, TaskID } from '@agor/core/types';
 import { SessionStatus } from '@agor/core/types';
@@ -19,7 +19,34 @@ export type SessionParams = QueryParams<{
   status?: Session['status'];
   agentic_tool?: Session['agentic_tool'];
   board_id?: string;
+  include_last_message?: boolean | 'true' | 'false'; // Opt-in last message enrichment
+  last_message_truncation_length?: number; // Default: 500 chars, min: 50, max: 10000
 }>;
+
+/**
+ * Parse and validate last_message_truncation_length parameter
+ * Feathers delivers query params as strings, so we need to parse and validate
+ */
+function parseTruncationLength(value: unknown): number {
+  // Default value
+  const DEFAULT = 500;
+  const MIN = 50;
+  const MAX = 10000;
+
+  if (value === undefined || value === null) {
+    return DEFAULT;
+  }
+
+  // Parse to number
+  const parsed = typeof value === 'number' ? value : Number(value);
+
+  // Validate: must be finite, positive, and within bounds
+  if (!Number.isFinite(parsed) || parsed < MIN || parsed > MAX) {
+    return DEFAULT;
+  }
+
+  return Math.floor(parsed); // Ensure integer
+}
 
 /**
  * Extended sessions service with custom methods
@@ -438,10 +465,10 @@ export class SessionsService extends DrizzleService<Session, Partial<Session>, S
 
     // Single delete with cascade
     // Get the session before deleting
-    const session = await this.get(id, params);
+    const session = await this.get(String(id), params);
 
     // Find all children (forks and subsessions)
-    const children = await this.sessionRepo.findChildren(id as string);
+    const children = await this.sessionRepo.findChildren(String(id));
 
     // Recursively delete all children first
     if (children.length > 0) {
@@ -460,30 +487,42 @@ export class SessionsService extends DrizzleService<Session, Partial<Session>, S
   }
 
   /**
-   * Override find to support custom filtering
+   * Override get to optionally enrich with last message
+   *
+   * Last message enrichment is opt-in via include_last_message query parameter
    */
-  async find(params?: SessionParams): Promise<Paginated<Session> | Session[]> {
-    // If filtering by status, use repository method (more efficient)
-    if (params?.query?.status) {
-      const sessions = await this.sessionRepo.findByStatus(params.query.status);
+  async get(id: string, params?: SessionParams): Promise<SessionWithLastMessage> {
+    // Check both query params and root-level params (root-level bypasses Feathers query filtering)
+    const includeLastMessageQuery = params?.query?.include_last_message;
+    // biome-ignore lint/suspicious/noExplicitAny: Custom params bypass Feathers type system
+    const includeLastMessageRoot = (params as any)?._include_last_message;
+    const includeLastMessage = includeLastMessageRoot ?? includeLastMessageQuery;
 
-      // Apply pagination if enabled
-      if (this.paginate) {
-        const limit = params.query.$limit ?? this.paginate.default ?? 50;
-        const skip = params.query.$skip ?? 0;
+    const session = await super.get(id, params);
 
-        return {
-          total: sessions.length,
-          limit,
-          skip,
-          data: sessions.slice(skip, skip + limit),
-        };
-      }
-
-      return sessions;
+    // Only enrich with last message if explicitly requested
+    if (includeLastMessage === true || includeLastMessage === 'true') {
+      const truncationLengthQuery = params?.query?.last_message_truncation_length;
+      // biome-ignore lint/suspicious/noExplicitAny: Custom params bypass Feathers type system
+      const truncationLengthRoot = (params as any)?._last_message_truncation_length;
+      const truncationLength = parseTruncationLength(truncationLengthRoot ?? truncationLengthQuery);
+      const result = await this.sessionRepo.enrichWithLastMessage(
+        session as Session,
+        truncationLength
+      );
+      return result;
     }
 
-    // Otherwise use default find
+    return session as SessionWithLastMessage;
+  }
+
+  /**
+   * Override find - no custom logic, just use default find
+   *
+   * Note: Last message is NOT included in list operations - only on single GET
+   */
+  async find(params?: SessionParams): Promise<Paginated<Session> | Session[]> {
+    // Use default find to ensure all hooks and scoping are applied
     return super.find(params);
   }
 }

@@ -1170,7 +1170,14 @@ export function setupMCPRoutes(app: Application): void {
             });
           }
 
-          const session = await app.service('sessions').get(args.sessionId);
+          // Include last message in MCP session get calls
+          // Pass enrichment flags at params root level to bypass Feathers query filtering
+          const session = await app.service('sessions').get(args.sessionId, {
+            ...baseServiceParams,
+            _include_last_message: true,
+            _last_message_truncation_length: 500,
+            // biome-ignore lint/suspicious/noExplicitAny: Custom params bypass Feathers type system
+          } as any);
           mcpResponse = {
             content: [
               {
@@ -1180,8 +1187,14 @@ export function setupMCPRoutes(app: Application): void {
             ],
           };
         } else if (name === 'agor_sessions_get_current') {
-          // Get current session using token context
-          const session = await app.service('sessions').get(context.sessionId);
+          // Get current session using token context with last message
+          // Pass enrichment flags at params root level to bypass Feathers query filtering
+          const session = await app.service('sessions').get(context.sessionId, {
+            ...baseServiceParams,
+            _include_last_message: true,
+            _last_message_truncation_length: 500,
+            // biome-ignore lint/suspicious/noExplicitAny: Custom params bypass Feathers type system
+          } as any);
           mcpResponse = {
             content: [
               {
@@ -1548,7 +1561,7 @@ export function setupMCPRoutes(app: Application): void {
           }
 
           // Build model config (if user has defaults for this tool and a model is specified)
-          let modelConfig: Record<string, unknown> | undefined = undefined;
+          let modelConfig: Record<string, unknown> | undefined;
           if (userToolDefaults?.modelConfig?.model) {
             modelConfig = {
               mode: userToolDefaults.modelConfig.mode || 'alias',
@@ -1849,7 +1862,14 @@ export function setupMCPRoutes(app: Application): void {
             });
           }
 
-          const worktree = await app.service('worktrees').get(args.worktreeId);
+          // Include session activity in MCP worktree get calls
+          // Pass enrichment flags at params root level to bypass Feathers query filtering
+          const worktree = await app.service('worktrees').get(args.worktreeId, {
+            ...baseServiceParams,
+            _include_sessions: true,
+            _last_message_truncation_length: 500,
+            // biome-ignore lint/suspicious/noExplicitAny: Custom params bypass Feathers type system
+          } as any);
           mcpResponse = {
             content: [
               {
