@@ -5,6 +5,7 @@
  * Uses session tokens for authentication.
  */
 
+import { extractSlugFromUrl, isValidGitUrl, isValidSlug } from '@agor/core/config';
 import type { Application } from '@agor/core/feathers';
 import type { AgenticToolName } from '@agor/core/types';
 import { normalizeOptionalHttpUrl } from '@agor/core/utils/url';
@@ -405,6 +406,85 @@ export function setupMCPRoutes(app: Application): void {
               },
             },
 
+            // Repository tools
+            {
+              name: 'agor_repos_list',
+              description: 'List all repositories accessible to the current user',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  slug: {
+                    type: 'string',
+                    description: 'Filter by repository slug',
+                  },
+                  limit: {
+                    type: 'number',
+                    description: 'Maximum number of results (default: 50)',
+                  },
+                },
+              },
+            },
+            {
+              name: 'agor_repos_get',
+              description: 'Get detailed information about a specific repository',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  repoId: {
+                    type: 'string',
+                    description: 'Repository ID (UUIDv7 or short ID)',
+                  },
+                },
+                required: ['repoId'],
+              },
+            },
+            {
+              name: 'agor_repos_create_remote',
+              description:
+                'Clone a remote repository into Agor. Returns immediately with pending status - repository will be created asynchronously.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  url: {
+                    type: 'string',
+                    description:
+                      'Git remote URL (https://github.com/user/repo.git or git@github.com:user/repo.git)',
+                  },
+                  slug: {
+                    type: 'string',
+                    description:
+                      'URL-friendly slug for the repository in org/name format (e.g., "myorg/myapp"). Required.',
+                  },
+                  name: {
+                    type: 'string',
+                    description:
+                      'Human-readable name for the repository. If not provided, defaults to the slug.',
+                  },
+                },
+                required: ['url'],
+              },
+            },
+            {
+              name: 'agor_repos_create_local',
+              description: 'Register an existing local git repository with Agor',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  path: {
+                    type: 'string',
+                    description:
+                      'Absolute path to the local git repository. Supports ~ for home directory.',
+                  },
+                  slug: {
+                    type: 'string',
+                    description:
+                      'URL-friendly slug for the repository (e.g., "local/myapp"). If not provided, will be auto-derived from the repository name.',
+                  },
+                },
+                required: ['path'],
+              },
+            },
+
             // Worktree tools
             {
               name: 'agor_worktrees_get',
@@ -655,6 +735,66 @@ export function setupMCPRoutes(app: Application): void {
                     description: 'Maximum number of results (default: 50)',
                   },
                 },
+              },
+            },
+            {
+              name: 'agor_boards_update',
+              description:
+                'Update board metadata and manage zones/objects. Can update name, icon, background, and create/update zones for organizing worktrees. Zone objects have: type="zone", x, y, width, height, label, borderColor, backgroundColor, borderStyle (optional), trigger (optional: "always_new" auto-creates sessions, "show_picker" shows agent selection). Text objects have: type="text", x, y, text, fontSize, color. Markdown objects have: type="markdown", x, y, width, height, content.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  boardId: {
+                    type: 'string',
+                    description: 'Board ID (UUIDv7 or short ID)',
+                  },
+                  name: {
+                    type: 'string',
+                    description: 'Board name (optional)',
+                  },
+                  description: {
+                    type: 'string',
+                    description: 'Board description (optional)',
+                  },
+                  icon: {
+                    type: 'string',
+                    description: 'Board icon/emoji (optional)',
+                  },
+                  color: {
+                    type: 'string',
+                    description: 'Board color (hex format, optional)',
+                  },
+                  backgroundColor: {
+                    type: 'string',
+                    description: 'Board background color (hex format, optional)',
+                  },
+                  slug: {
+                    type: 'string',
+                    description: 'URL-friendly slug (optional)',
+                  },
+                  customContext: {
+                    type: 'object',
+                    additionalProperties: true,
+                    description: 'Custom context for templates (optional)',
+                  },
+                  upsertObjects: {
+                    type: 'object',
+                    additionalProperties: true,
+                    description:
+                      'Board objects to upsert (zones, text, markdown). Keys are object IDs, values are object data. ' +
+                      'Zone objects: { type: "zone", x: number, y: number, width: number, height: number, label: string, ' +
+                      'borderColor: string (hex), backgroundColor: string (hex), borderStyle?: "solid"|"dashed", ' +
+                      'trigger?: { behavior: "always_new"|"show_picker", agent?: "claude-code"|"codex"|"gemini" } }. ' +
+                      'Text objects: { type: "text", x: number, y: number, text: string }. ' +
+                      'Markdown objects: { type: "markdown", x: number, y: number, content: string }.',
+                  },
+                  removeObjects: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Array of object IDs to remove from the board',
+                  },
+                },
+                required: ['boardId'],
               },
             },
 
@@ -1463,6 +1603,136 @@ export function setupMCPRoutes(app: Application): void {
             ],
           };
 
+          // Repository tools
+        } else if (name === 'agor_repos_list') {
+          const query: Record<string, unknown> = {};
+          if (args?.slug) query.slug = args.slug;
+          if (args?.limit) query.$limit = args.limit;
+
+          const repos = await app.service('repos').find({ query, ...baseServiceParams });
+          mcpResponse = {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(repos, null, 2),
+              },
+            ],
+          };
+        } else if (name === 'agor_repos_get') {
+          if (!args?.repoId) {
+            return res.status(400).json({
+              jsonrpc: '2.0',
+              id: mcpRequest.id,
+              error: {
+                code: -32602,
+                message: 'Invalid params: repoId is required',
+              },
+            });
+          }
+
+          const repo = await app.service('repos').get(args.repoId, baseServiceParams);
+          mcpResponse = {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(repo, null, 2),
+              },
+            ],
+          };
+        } else if (name === 'agor_repos_create_remote') {
+          const url = coerceString(args?.url);
+          if (!url) {
+            return res.status(400).json({
+              jsonrpc: '2.0',
+              id: mcpRequest.id,
+              error: {
+                code: -32602,
+                message: 'Invalid params: url is required',
+              },
+            });
+          }
+
+          // Validate git URL format
+          if (!isValidGitUrl(url)) {
+            return res.status(400).json({
+              jsonrpc: '2.0',
+              id: mcpRequest.id,
+              error: {
+                code: -32602,
+                message: 'Invalid params: url must be a valid git URL (https:// or git@)',
+              },
+            });
+          }
+
+          // Derive slug from URL if not provided
+          let slug = coerceString(args?.slug);
+          if (!slug) {
+            try {
+              slug = extractSlugFromUrl(url);
+            } catch (_error) {
+              return res.status(400).json({
+                jsonrpc: '2.0',
+                id: mcpRequest.id,
+                error: {
+                  code: -32602,
+                  message: `Could not derive slug from URL. Please provide a slug explicitly.`,
+                },
+              });
+            }
+          }
+
+          // Validate slug format
+          if (!isValidSlug(slug)) {
+            return res.status(400).json({
+              jsonrpc: '2.0',
+              id: mcpRequest.id,
+              error: {
+                code: -32602,
+                message: 'Invalid params: slug must be in org/name format',
+              },
+            });
+          }
+
+          const name = coerceString(args?.name);
+
+          const reposService = app.service('repos') as unknown as ReposServiceImpl;
+          const result = await reposService.cloneRepository({ url, slug, name }, baseServiceParams);
+
+          mcpResponse = {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        } else if (name === 'agor_repos_create_local') {
+          const path = coerceString(args?.path);
+          if (!path) {
+            return res.status(400).json({
+              jsonrpc: '2.0',
+              id: mcpRequest.id,
+              error: {
+                code: -32602,
+                message: 'Invalid params: path is required',
+              },
+            });
+          }
+
+          const slug = coerceString(args?.slug);
+
+          const reposService = app.service('repos') as unknown as ReposServiceImpl;
+          const repo = await reposService.addLocalRepository({ path, slug }, baseServiceParams);
+
+          mcpResponse = {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(repo, null, 2),
+              },
+            ],
+          };
+
           // Worktree tools
         } else if (name === 'agor_worktrees_get') {
           if (!args?.worktreeId) {
@@ -2135,6 +2405,82 @@ export function setupMCPRoutes(app: Application): void {
               {
                 type: 'text',
                 text: JSON.stringify(boards, null, 2),
+              },
+            ],
+          };
+        } else if (name === 'agor_boards_update') {
+          if (!args?.boardId) {
+            return res.status(400).json({
+              jsonrpc: '2.0',
+              id: mcpRequest.id,
+              error: {
+                code: -32602,
+                message: 'Invalid params: boardId is required',
+              },
+            });
+          }
+
+          console.log(`📝 MCP updating board ${args.boardId.substring(0, 8)}`);
+
+          const boardsService = app.service(
+            'boards'
+          ) as unknown as import('../declarations').BoardsServiceImpl;
+
+          // Build metadata updates
+          const metadataUpdates: Record<string, unknown> = {};
+          if (args.name !== undefined) metadataUpdates.name = args.name;
+          if (args.description !== undefined) metadataUpdates.description = args.description;
+          if (args.icon !== undefined) metadataUpdates.icon = args.icon;
+          if (args.color !== undefined) metadataUpdates.color = args.color;
+          if (args.backgroundColor !== undefined)
+            metadataUpdates.background_color = args.backgroundColor;
+          if (args.slug !== undefined) metadataUpdates.slug = args.slug;
+          if (args.customContext !== undefined) metadataUpdates.custom_context = args.customContext;
+
+          // Update board metadata if any provided
+          if (Object.keys(metadataUpdates).length > 0) {
+            await app.service('boards').patch(args.boardId, metadataUpdates, baseServiceParams);
+            console.log(`✅ Board metadata updated`);
+          }
+
+          // Handle object upserts (zones, text, markdown)
+          if (
+            args.upsertObjects &&
+            typeof args.upsertObjects === 'object' &&
+            !Array.isArray(args.upsertObjects)
+          ) {
+            // Note: declarations.ts says unknown[] but the actual implementation expects Record<string, BoardObject>
+            await boardsService.batchUpsertBoardObjects(
+              args.boardId,
+              args.upsertObjects as unknown as unknown[],
+              baseServiceParams
+            );
+            console.log(`✅ Upserted ${Object.keys(args.upsertObjects).length} board object(s)`);
+          }
+
+          // Handle object removals
+          if (args.removeObjects && Array.isArray(args.removeObjects)) {
+            for (const objectId of args.removeObjects) {
+              await boardsService.removeBoardObject(args.boardId, objectId, baseServiceParams);
+            }
+            console.log(`✅ Removed ${args.removeObjects.length} board object(s)`);
+          }
+
+          // Get updated board
+          const board = await app.service('boards').get(args.boardId, baseServiceParams);
+
+          mcpResponse = {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    board,
+                    note: 'Board updated successfully.',
+                  },
+                  null,
+                  2
+                ),
               },
             ],
           };
