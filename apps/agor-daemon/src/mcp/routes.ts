@@ -7,7 +7,7 @@
 
 import { extractSlugFromUrl, isValidGitUrl, isValidSlug } from '@agor/core/config';
 import type { Application } from '@agor/core/feathers';
-import type { AgenticToolName } from '@agor/core/types';
+import type { AgenticToolName, Board } from '@agor/core/types';
 import { normalizeOptionalHttpUrl } from '@agor/core/utils/url';
 import type { Request, Response } from 'express';
 import type { ReposServiceImpl, SessionsServiceImpl } from '../declarations.js';
@@ -2235,34 +2235,67 @@ export function setupMCPRoutes(app: Application): void {
               });
             }
 
-            // Calculate zone center position
-            const centerX = zone.x + zone.width / 2;
-            const centerY = zone.y + zone.height / 2;
+            // Calculate position RELATIVE to zone (not absolute canvas coordinates)
+            // The UI expects relative positions and adds zone.x/zone.y when rendering
+            // (see apps/agor-ui/src/components/SessionCanvas/SessionCanvas.tsx:480-481)
+            const WORKTREE_CARD_WIDTH = 500;
+            const WORKTREE_CARD_HEIGHT = 200;
+
+            // Center the card within the zone by placing it at:
+            // - Horizontally: (zone.width - cardWidth) / 2
+            // - Vertically: (zone.height - cardHeight) / 2
+            const relativeX = (zone.width - WORKTREE_CARD_WIDTH) / 2;
+            const relativeY = (zone.height - WORKTREE_CARD_HEIGHT) / 2;
 
             // Find or create board object for this worktree
-            const boardObjectsRepo = app.get('boardObjectsRepository');
-            let boardObject = await boardObjectsRepo.findByWorktreeId(
-              worktreeId as import('@agor/core/types').WorktreeID
-            );
+            const boardObjectsService = app.service('board-objects') as unknown as {
+              findByWorktreeId: (
+                worktreeId: import('@agor/core/types').WorktreeID,
+                params?: unknown
+              ) => Promise<import('@agor/core/types').BoardEntityObject | null>;
+              create: (
+                data: unknown,
+                params?: unknown
+              ) => Promise<import('@agor/core/types').BoardEntityObject>;
+              patch: (
+                objectId: string,
+                data: Partial<import('@agor/core/types').BoardEntityObject>,
+                params?: unknown
+              ) => Promise<import('@agor/core/types').BoardEntityObject>;
+            };
+            let boardObject: import('@agor/core/types').BoardEntityObject | null =
+              await boardObjectsService.findByWorktreeId(
+                worktreeId as import('@agor/core/types').WorktreeID,
+                baseServiceParams
+              );
 
             if (!boardObject) {
               // Create new board object
-              boardObject = await boardObjectsRepo.create({
-                board_id: worktree.board_id as import('@agor/core/types').BoardID,
-                worktree_id: worktreeId as import('@agor/core/types').WorktreeID,
-                position: { x: centerX, y: centerY },
-                zone_id: zoneId,
-              });
+              boardObject = await boardObjectsService.create(
+                {
+                  board_id: worktree.board_id as import('@agor/core/types').BoardID,
+                  worktree_id: worktreeId as import('@agor/core/types').WorktreeID,
+                  position: { x: relativeX, y: relativeY },
+                  zone_id: zoneId,
+                },
+                baseServiceParams
+              );
             } else {
               // Update existing board object with zone and center position
-              await boardObjectsRepo.updatePosition(boardObject.object_id, {
-                x: centerX,
-                y: centerY,
-              });
-              boardObject = await boardObjectsRepo.updateZone(boardObject.object_id, zoneId);
+              // Use patch() to update both position and zone_id atomically with single WebSocket event
+              boardObject = await boardObjectsService.patch(
+                boardObject.object_id,
+                {
+                  position: { x: relativeX, y: relativeY },
+                  zone_id: zoneId,
+                },
+                baseServiceParams
+              );
             }
 
-            console.log(`✅ Worktree pinned to zone at position (${centerX}, ${centerY})`);
+            console.log(
+              `✅ Worktree pinned to zone at relative position (${relativeX}, ${relativeY})`
+            );
 
             // Trigger zone prompt template if requested
             let promptResult: { taskId?: string; note: string } | undefined;
@@ -2331,7 +2364,7 @@ export function setupMCPRoutes(app: Application): void {
                       success: true,
                       worktree_id: worktree.worktree_id,
                       zone_id: zoneId,
-                      position: { x: centerX, y: centerY },
+                      position: { x: relativeX, y: relativeY },
                       board_object_id: boardObject.object_id,
                       ...(promptResult ? { trigger: promptResult } : {}),
                     },
@@ -2714,20 +2747,33 @@ export function setupMCPRoutes(app: Application): void {
             !Array.isArray(args.upsertObjects)
           ) {
             // Note: declarations.ts says unknown[] but the actual implementation expects Record<string, BoardObject>
-            await boardsService.batchUpsertBoardObjects(
+            const updatedBoard = await boardsService.batchUpsertBoardObjects(
               args.boardId,
               args.upsertObjects as unknown as unknown[],
               baseServiceParams
             );
             console.log(`✅ Upserted ${Object.keys(args.upsertObjects).length} board object(s)`);
+
+            // Emit WebSocket event for real-time updates
+            app.service('boards').emit('patched', updatedBoard);
           }
 
           // Handle object removals
           if (args.removeObjects && Array.isArray(args.removeObjects)) {
+            let finalBoard: Board | undefined;
             for (const objectId of args.removeObjects) {
-              await boardsService.removeBoardObject(args.boardId, objectId, baseServiceParams);
+              finalBoard = await boardsService.removeBoardObject(
+                args.boardId,
+                objectId,
+                baseServiceParams
+              );
             }
             console.log(`✅ Removed ${args.removeObjects.length} board object(s)`);
+
+            // Emit WebSocket event for real-time updates (use final board state after all removals)
+            if (finalBoard) {
+              app.service('boards').emit('patched', finalBoard);
+            }
           }
 
           // Get updated board
