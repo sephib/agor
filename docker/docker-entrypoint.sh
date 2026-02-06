@@ -10,11 +10,11 @@ echo "✅ Using pre-built dependencies from Docker image"
 # Fix home directory permissions (volumes may have wrong UID/GID from previous builds)
 echo "🔧 Fixing home directory permissions..."
 mkdir -p /home/agor/.agor /home/agor/.cache
-sudo chown -R agor:agor /home/agor 2>/dev/null || true
+sudo -n chown -R agor:agor /home/agor 2>/dev/null || true
 
 # Setup agor_executor home (for Unix isolation when executor_unix_user is configured)
-sudo mkdir -p /home/agor_executor/.cache /home/agor_executor/.agor
-sudo chown -R agor_executor:agor_executor /home/agor_executor 2>/dev/null || true
+sudo -n mkdir -p /home/agor_executor/.cache /home/agor_executor/.agor
+sudo -n chown -R agor_executor:agor_executor /home/agor_executor 2>/dev/null || true
 echo "✅ Home directory permissions fixed"
 
 # Fix build directory permissions (clean stale dist files with wrong ownership)

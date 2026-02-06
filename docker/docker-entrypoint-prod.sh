@@ -6,7 +6,7 @@ echo "🚀 Starting Agor production environment..."
 # Fix volume permissions (volumes may be created with wrong ownership)
 # Only chown .agor directory (not .ssh which is mounted read-only)
 mkdir -p /home/agor/.agor
-sudo chown -R agor:agor /home/agor/.agor
+sudo -n chown -R agor:agor /home/agor/.agor
 
 # Initialize database and configure daemon settings
 # --skip-if-exists: Idempotent, won't overwrite existing database

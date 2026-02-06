@@ -12,7 +12,7 @@ echo ""
 
 # Start SSH server in background (only if postgres profile is active)
 echo "🔑 Starting SSH server..."
-sudo /usr/sbin/sshd
+sudo -n /usr/sbin/sshd
 echo "✅ SSH server running on port 22 (exposed as ${SSH_PORT:-2222})"
 
 # Create Unix users: alice and bob
@@ -27,22 +27,22 @@ create_unix_user() {
   echo "👤 Creating Unix user: $username"
 
   # Create user with home directory
-  sudo useradd -m -s /bin/bash "$username"
+  sudo -n useradd -m -s /bin/bash "$username"
 
   # Set password to 'admin'
-  echo "$username:admin" | sudo chpasswd
+  echo "$username:admin" | sudo -n chpasswd
 
   # Create .agor directory
-  sudo mkdir -p "/home/$username/.agor"
+  sudo -n mkdir -p "/home/$username/.agor"
 
   # Copy Zellij config
   if [ -f "/home/agor/.config/zellij/config.kdl" ]; then
-    sudo mkdir -p "/home/$username/.config/zellij"
-    sudo cp /home/agor/.config/zellij/config.kdl "/home/$username/.config/zellij/"
+    sudo -n mkdir -p "/home/$username/.config/zellij"
+    sudo -n cp /home/agor/.config/zellij/config.kdl "/home/$username/.config/zellij/"
   fi
 
   # Fix ownership
-  sudo chown -R "$username:$username" "/home/$username"
+  sudo -n chown -R "$username:$username" "/home/$username"
 
   echo "✅ Unix user created: $username (password: admin)"
 }
