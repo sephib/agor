@@ -2295,11 +2295,32 @@ export function setupMCPRoutes(app: Application): void {
             const WORKTREE_CARD_WIDTH = 500;
             const WORKTREE_CARD_HEIGHT = 200;
 
-            // Center the card within the zone by placing it at:
-            // - Horizontally: (zone.width - cardWidth) / 2
-            // - Vertically: (zone.height - cardHeight) / 2
-            const relativeX = (zone.width - WORKTREE_CARD_WIDTH) / 2;
-            const relativeY = (zone.height - WORKTREE_CARD_HEIGHT) / 2;
+            // Add jitter to prevent worktree cards from stacking exactly on top of each other
+            // Use adaptive padding to keep cards away from zone edges when possible
+            const DESIRED_PADDING = 80; // pixels from zone edges (best effort)
+
+            // Calculate adaptive padding that respects zone constraints
+            // For small zones, reduce padding to ensure cards fit within bounds
+            const maxPaddingX = Math.max(0, (zone.width - WORKTREE_CARD_WIDTH) / 2);
+            const maxPaddingY = Math.max(0, (zone.height - WORKTREE_CARD_HEIGHT) / 2);
+            const paddingX = Math.min(DESIRED_PADDING, maxPaddingX);
+            const paddingY = Math.min(DESIRED_PADDING, maxPaddingY);
+
+            // Calculate jitter range (clamped to >= 0 for small zones)
+            const jitterRangeX = Math.max(0, zone.width - WORKTREE_CARD_WIDTH - 2 * paddingX);
+            const jitterRangeY = Math.max(0, zone.height - WORKTREE_CARD_HEIGHT - 2 * paddingY);
+
+            // Generate random position within valid area
+            // For zones too small for jitter, cards will be centered (jitterRange = 0)
+            const relativeX = paddingX + Math.random() * jitterRangeX;
+            const relativeY = paddingY + Math.random() * jitterRangeY;
+
+            // Log warning if zone is smaller than card (card will overflow)
+            if (zone.width < WORKTREE_CARD_WIDTH || zone.height < WORKTREE_CARD_HEIGHT) {
+              console.warn(
+                `⚠️  Zone ${zoneId} is smaller than worktree card (${zone.width}x${zone.height} < ${WORKTREE_CARD_WIDTH}x${WORKTREE_CARD_HEIGHT}), card may overflow zone bounds`
+              );
+            }
 
             // Find or create board object for this worktree
             const boardObjectsService = app.service('board-objects') as unknown as {
