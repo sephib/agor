@@ -1,6 +1,6 @@
 {
   "name": "agor-live",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Multiplayer canvas for orchestrating AI coding sessions",
   "type": "module",
   "bin": {
@@ -45,7 +45,7 @@
     "url": "https://github.com/preset-io/agor/issues"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.29",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.33",
     "@feathersjs/authentication": "^5.0.37",
     "@feathersjs/authentication-client": "^5.0.37",
     "@feathersjs/authentication-local": "^5.0.37",
@@ -57,16 +57,16 @@
     "@feathersjs/socketio": "^5.0.37",
     "@feathersjs/socketio-client": "^5.0.37",
     "@feathersjs/typebox": "^5.0.37",
-    "@google/gemini-cli-core": "^0.21.3",
-    "@google/genai": "^1.34.0",
+    "@google/gemini-cli-core": "^0.27.2",
+    "@google/genai": "^1.40.0",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@iarna/toml": "^2.2.5",
     "@libsql/client": "^0.15.15",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@oclif/core": "^4.6.0",
     "@oclif/plugin-help": "^6.2.18",
-    "@openai/codex-sdk": "^0.71.0",
-    "@opencode-ai/sdk": "^1.0.122",
+    "@openai/codex-sdk": "^0.98.0",
+    "@opencode-ai/sdk": "^1.1.53",
     "bcryptjs": "^2.4.3",
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
