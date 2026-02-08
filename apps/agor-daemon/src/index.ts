@@ -311,6 +311,7 @@ import type {
   SessionsServiceImpl,
   TasksServiceImpl,
 } from './declarations';
+import { gatewayRouteHook } from './hooks/gateway-route';
 import { createBoardCommentsService } from './services/board-comments';
 import { createBoardObjectsService } from './services/board-objects';
 import { createBoardsService } from './services/boards';
@@ -318,6 +319,8 @@ import { createConfigService } from './services/config';
 import { createContextService } from './services/context';
 import { createFileService } from './services/file';
 import { createFilesService } from './services/files';
+import { createGatewayService, type GatewayService } from './services/gateway';
+import { createGatewayChannelsService } from './services/gateway-channels';
 import { createHealthMonitor } from './services/health-monitor';
 import { createLeaderboardService } from './services/leaderboard';
 import { createMCPServersService } from './services/mcp-servers';
@@ -328,6 +331,7 @@ import { createSessionMCPServersService } from './services/session-mcp-servers';
 import { createSessionsService } from './services/sessions';
 import { createTasksService } from './services/tasks';
 import { TerminalsService } from './services/terminals';
+import { createThreadSessionMapService } from './services/thread-session-map';
 import { createUsersService } from './services/users';
 import { setupWorktreeOwnersService } from './services/worktree-owners.js';
 import { createWorktreesService } from './services/worktrees';
@@ -1919,6 +1923,13 @@ async function main() {
     },
   });
 
+  // Register gateway services
+  app.use('/gateway-channels', createGatewayChannelsService(db));
+  app.use('/thread-session-map', createThreadSessionMapService(db));
+  app.use('/gateway', createGatewayService(db, app), {
+    methods: ['create', 'routeMessage'],
+  });
+
   // Register config service for API key management
   const configService = createConfigService(db);
   // Store app reference for service method access
@@ -2050,6 +2061,7 @@ async function main() {
       ],
     },
     after: {
+      create: [gatewayRouteHook],
       patch: [
         async (context: HookContext<Board>) => {
           // Detect permission resolution and notify executor via IPC
@@ -2394,6 +2406,61 @@ async function main() {
       find: [requireMinimumRole('member', 'list session MCP servers')],
     },
   });
+
+  // Refresh the gateway's in-memory channel state when channels are mutated.
+  // This allows routeMessage() to skip DB lookups entirely when no channels exist.
+  const refreshGatewayChannelState = async (context: HookContext) => {
+    const gw = context.app.service('gateway') as unknown as GatewayService;
+    gw.refreshChannelState().catch((err: unknown) =>
+      console.warn('[gateway] Failed to refresh channel state:', err)
+    );
+    return context;
+  };
+
+  app.service('gateway-channels').hooks({
+    before: {
+      all: [requireAuth],
+      create: [requireMinimumRole('member', 'create gateway channels')],
+      patch: [requireMinimumRole('member', 'update gateway channels')],
+      remove: [requireMinimumRole('member', 'delete gateway channels')],
+    },
+    after: {
+      all: [
+        // Redact sensitive config fields in API responses
+        async (context: HookContext) => {
+          const redact = (channel: Record<string, unknown>) => {
+            if (channel?.config && typeof channel.config === 'object') {
+              const config = { ...(channel.config as Record<string, unknown>) };
+              for (const field of ['bot_token', 'app_token', 'signing_secret']) {
+                if (config[field]) {
+                  config[field] = '••••••••';
+                }
+              }
+              channel.config = config;
+            }
+          };
+          if (Array.isArray(context.result?.data)) {
+            for (const item of context.result.data) redact(item);
+          } else if (context.result) {
+            redact(context.result as Record<string, unknown>);
+          }
+          return context;
+        },
+      ],
+      create: [refreshGatewayChannelState],
+      patch: [refreshGatewayChannelState],
+      remove: [refreshGatewayChannelState],
+    },
+  });
+
+  app.service('thread-session-map').hooks({
+    before: {
+      all: [requireAuth],
+    },
+  });
+
+  // Gateway service create (postMessage) authenticates via channel_key, not user auth
+  // No hooks needed — auth is handled internally by the service
 
   app.service('config').hooks({
     before: {
@@ -5502,6 +5569,17 @@ async function main() {
   schedulerService.start();
   console.log(`🔄 Scheduler started (tick interval: 30s)`);
 
+  // Initialize gateway: refresh channel state cache, then start Socket Mode listeners
+  const gatewayService = app.service('gateway') as unknown as GatewayService;
+  gatewayService
+    .refreshChannelState()
+    .then(() => {
+      return gatewayService.startListeners();
+    })
+    .catch((error: unknown) => {
+      console.error('[gateway] Failed to start listeners:', error);
+    });
+
   // Graceful shutdown handler
   const shutdown = async (signal: string) => {
     console.log(`\n⏳ Received ${signal}, shutting down gracefully...`);
@@ -5513,6 +5591,10 @@ async function main() {
       // Clean up terminal sessions
       console.log('🖥️  Cleaning up terminal sessions...');
       terminalsService.cleanup();
+
+      // Stop gateway listeners
+      console.log('🌐 Stopping gateway listeners...');
+      await gatewayService.stopListeners();
 
       // Stop scheduler
       console.log('🔄 Stopping scheduler...');
