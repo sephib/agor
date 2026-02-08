@@ -114,7 +114,7 @@ export const BasePayloadSchema = z.object({
   daemonUrl: z.string().url().optional(),
 
   /** Environment variables to inject */
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
 
   /** Data home directory override */
   dataHome: z.string().optional(),
