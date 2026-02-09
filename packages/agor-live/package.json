@@ -94,7 +94,7 @@
     "swagger-ui-dist": "^5.30.0",
     "uuid": "^13.0.0",
     "uuidv7": "^1.0.2",
-    "zod": "^4.0.0"
+    "zod": "^4.3.6"
   },
   "oclif": {
     "bin": "agor",

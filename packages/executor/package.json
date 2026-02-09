@@ -18,7 +18,7 @@
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@iarna/toml": "^2.2.5",
     "@opencode-ai/sdk": "^1.1.53",
-    "zod": "^4.0.0"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",
