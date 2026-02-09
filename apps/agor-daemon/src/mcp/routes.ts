@@ -159,7 +159,7 @@ export function setupMCPRoutes(app: Application): void {
             {
               name: 'agor_sessions_spawn',
               description:
-                'Spawn a child session (subsession) for delegating work to another agent. Creates a new session, executes the prompt, and tracks genealogy.',
+                'Spawn a child session (subsession) for delegating work to another agent. Creates a new session, executes the prompt, and tracks genealogy. Session configuration is inherited from parent (same agent) or user defaults (different agent).',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -177,61 +177,6 @@ export function setupMCPRoutes(app: Application): void {
                     enum: ['claude-code', 'codex', 'gemini', 'opencode'],
                     description:
                       'Which agent to use for the subsession (defaults to same as parent)',
-                  },
-                  permissionMode: {
-                    type: 'string',
-                    enum: [
-                      'default',
-                      'acceptEdits',
-                      'bypassPermissions',
-                      'plan',
-                      'ask',
-                      'auto',
-                      'on-failure',
-                      'allow-all',
-                    ],
-                    description: 'Permission mode override (defaults based on config preset)',
-                  },
-                  modelConfig: {
-                    type: 'object',
-                    properties: {
-                      mode: {
-                        type: 'string',
-                        enum: ['alias', 'exact'],
-                      },
-                      model: {
-                        type: 'string',
-                      },
-                      thinkingMode: {
-                        type: 'string',
-                        enum: ['auto', 'manual', 'off'],
-                      },
-                      manualThinkingTokens: {
-                        type: 'number',
-                      },
-                    },
-                    description: 'Model configuration override',
-                  },
-                  codexSandboxMode: {
-                    type: 'string',
-                    enum: ['read-only', 'workspace-write', 'danger-full-access'],
-                    description: 'Codex sandbox mode (codex only)',
-                  },
-                  codexApprovalPolicy: {
-                    type: 'string',
-                    enum: ['untrusted', 'on-request', 'on-failure', 'never'],
-                    description: 'Codex approval policy (codex only)',
-                  },
-                  codexNetworkAccess: {
-                    type: 'boolean',
-                    description: 'Codex network access (codex only)',
-                  },
-                  mcpServerIds: {
-                    type: 'array',
-                    items: {
-                      type: 'string',
-                    },
-                    description: 'MCP server IDs to attach to spawned session',
                   },
                   enableCallback: {
                     type: 'boolean',
@@ -260,7 +205,7 @@ export function setupMCPRoutes(app: Application): void {
             {
               name: 'agor_sessions_prompt',
               description:
-                'Prompt an existing session to continue work. Supports three modes: continue (append to conversation), fork (branch at decision point), or subsession (delegate to child agent).',
+                'Prompt an existing session to continue work. Supports three modes: continue (append to conversation), fork (branch at decision point), or subsession (delegate to child agent). Configuration is inherited from parent session or user defaults.',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -282,22 +227,7 @@ export function setupMCPRoutes(app: Application): void {
                     type: 'string',
                     enum: ['claude-code', 'codex', 'gemini'],
                     description:
-                      'Override parent agent (for fork/subsession only, defaults to parent agent)',
-                  },
-                  permissionMode: {
-                    type: 'string',
-                    enum: [
-                      'default',
-                      'acceptEdits',
-                      'bypassPermissions',
-                      'plan',
-                      'ask',
-                      'auto',
-                      'on-failure',
-                      'allow-all',
-                    ],
-                    description:
-                      'Override permission mode (for fork/subsession only, defaults to parent mode)',
+                      'Agent for subsession (subsession mode only, defaults to parent agent). Fork mode always uses parent agent.',
                   },
                   title: {
                     type: 'string',
@@ -314,7 +244,7 @@ export function setupMCPRoutes(app: Application): void {
             {
               name: 'agor_sessions_create',
               description:
-                'Create a new session in an existing worktree. Useful for starting fresh work in the same codebase without forking or spawning.',
+                'Create a new session in an existing worktree. Useful for starting fresh work in the same codebase without forking or spawning. Session configuration (permissions, model, MCP servers) is automatically inherited from user defaults.',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -335,30 +265,10 @@ export function setupMCPRoutes(app: Application): void {
                     type: 'string',
                     description: 'Session description (optional)',
                   },
-                  permissionMode: {
-                    type: 'string',
-                    enum: [
-                      'default',
-                      'acceptEdits',
-                      'bypassPermissions',
-                      'plan',
-                      'ask',
-                      'auto',
-                      'on-failure',
-                      'allow-all',
-                    ],
-                    description:
-                      'Permission mode for tool approval (optional, defaults based on agenticTool)',
-                  },
                   contextFiles: {
                     type: 'array',
                     items: { type: 'string' },
                     description: 'Context file paths to load (optional)',
-                  },
-                  mcpServerIds: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'MCP server IDs to attach (optional)',
                   },
                   initialPrompt: {
                     type: 'string',
@@ -372,7 +282,7 @@ export function setupMCPRoutes(app: Application): void {
             {
               name: 'agor_sessions_update',
               description:
-                'Update session metadata (title, description, status, permissions). Useful for agents to self-document their work or adjust permissions.',
+                'Update session metadata (title, description, status). Useful for agents to self-document their work.',
               inputSchema: {
                 type: 'object',
                 properties: {
@@ -392,20 +302,6 @@ export function setupMCPRoutes(app: Application): void {
                     type: 'string',
                     enum: ['idle', 'running', 'completed', 'failed'],
                     description: 'New session status (optional)',
-                  },
-                  permissionMode: {
-                    type: 'string',
-                    enum: [
-                      'default',
-                      'acceptEdits',
-                      'bypassPermissions',
-                      'plan',
-                      'ask',
-                      'auto',
-                      'on-failure',
-                      'allow-all',
-                    ],
-                    description: 'New permission mode (optional)',
                   },
                 },
                 required: ['sessionId'],
@@ -1216,16 +1112,13 @@ export function setupMCPRoutes(app: Application): void {
             });
           }
 
+          // Build spawn config - only include fields we allow via MCP
+          // Explicitly omit permissionMode, modelConfig, codex*, and mcpServerIds
+          // These are managed via user defaults or inherited from parent
           const spawnData: Partial<import('@agor/core/types').SpawnConfig> = {
             prompt: args.prompt,
             title: args.title,
             agent: args.agenticTool as AgenticToolName | undefined,
-            permissionMode: args.permissionMode,
-            modelConfig: args.modelConfig,
-            codexSandboxMode: args.codexSandboxMode,
-            codexApprovalPolicy: args.codexApprovalPolicy,
-            codexNetworkAccess: args.codexNetworkAccess,
-            mcpServerIds: args.mcpServerIds,
             enableCallback: args.enableCallback,
             includeLastMessage: args.includeLastMessage,
             includeOriginalPrompt: args.includeOriginalPrompt,
@@ -1302,7 +1195,6 @@ export function setupMCPRoutes(app: Application): void {
             const promptResponse = await app.service('/sessions/:id/prompt').create(
               {
                 prompt: args.prompt,
-                permissionMode: args.permissionMode,
                 stream: true,
               },
               {
@@ -1348,32 +1240,9 @@ export function setupMCPRoutes(app: Application): void {
               app.service('sessions') as unknown as SessionsServiceImpl
             ).fork(args.sessionId, forkData, baseServiceParams);
 
-            // Override agentic tool if specified
-            if (args.agenticTool) {
-              await app
-                .service('sessions')
-                .patch(
-                  forkedSession.session_id,
-                  { agentic_tool: args.agenticTool as AgenticToolName },
-                  baseServiceParams
-                );
-            }
-
-            // Override permission mode if specified
-            if (args.permissionMode) {
-              const { mapPermissionMode } = await import('@agor/core/utils/permission-mode-mapper');
-              const mappedMode = mapPermissionMode(args.permissionMode, forkedSession.agentic_tool);
-              await app.service('sessions').patch(
-                forkedSession.session_id,
-                {
-                  permission_config: {
-                    ...forkedSession.permission_config,
-                    mode: mappedMode,
-                  },
-                },
-                baseServiceParams
-              );
-            }
+            // Note: We no longer allow changing agenticTool in fork mode via MCP.
+            // Fork inherits the same agent as parent. If you need a different agent,
+            // use 'subsession' mode instead, which properly handles config for different tools.
 
             // Set custom title if provided
             if (args.title) {
@@ -1422,12 +1291,7 @@ export function setupMCPRoutes(app: Application): void {
             // Mode: subsession - spawn child session (reuse existing spawn logic)
             console.log(`🌱 MCP spawning subsession from ${args.sessionId.substring(0, 8)}`);
 
-            const spawnData: {
-              prompt: string;
-              title?: string;
-              agentic_tool?: AgenticToolName;
-              task_id?: string;
-            } = {
+            const spawnData: Partial<import('@agor/core/types').SpawnConfig> = {
               prompt: args.prompt,
             };
 
@@ -1436,7 +1300,7 @@ export function setupMCPRoutes(app: Application): void {
             }
 
             if (args.agenticTool) {
-              spawnData.agentic_tool = args.agenticTool as AgenticToolName;
+              spawnData.agent = args.agenticTool as AgenticToolName;
             }
 
             if (args.taskId) {
@@ -1448,26 +1312,11 @@ export function setupMCPRoutes(app: Application): void {
               app.service('sessions') as unknown as SessionsServiceImpl
             ).spawn(args.sessionId, spawnData, baseServiceParams);
 
-            // Override permission mode if specified
-            if (args.permissionMode) {
-              const { mapPermissionMode } = await import('@agor/core/utils/permission-mode-mapper');
-              const mappedMode = mapPermissionMode(args.permissionMode, childSession.agentic_tool);
-              await app.service('sessions').patch(
-                childSession.session_id,
-                {
-                  permission_config: {
-                    ...childSession.permission_config,
-                    mode: mappedMode,
-                  },
-                },
-                baseServiceParams
-              );
-            }
+            // Permission mode is inherited from spawn() method (parent session or user defaults)
+            // No explicit override allowed via MCP to avoid complexity
 
-            // Get updated session
-            const updatedSession = await app
-              .service('sessions')
-              .get(childSession.session_id, baseServiceParams);
+            // Use childSession directly (no need to refetch)
+            const updatedSession = childSession;
 
             // Trigger prompt execution (spawns start fresh by default - see query-builder.ts)
             console.log(`🚀 Triggering prompt execution for subsession`);
@@ -1527,8 +1376,8 @@ export function setupMCPRoutes(app: Application): void {
           const currentSha = await getGitState(worktree.path);
           const currentRef = await getCurrentBranch(worktree.path);
 
-          // Determine permission mode
-          // Priority: explicit param > user defaults > system defaults
+          // Determine permission mode from user defaults only
+          // MCP tools should not override user preferences - they're too complex for agents to manage
           const { getDefaultPermissionMode } = await import('@agor/core/types');
           const { mapPermissionMode } = await import('@agor/core/utils/permission-mode-mapper');
           const agenticTool = args.agenticTool as AgenticToolName;
@@ -1536,9 +1385,7 @@ export function setupMCPRoutes(app: Application): void {
           // Check user's default_agentic_config for this tool
           const userToolDefaults = user?.default_agentic_config?.[agenticTool];
           const requestedMode =
-            args.permissionMode ||
-            userToolDefaults?.permissionMode ||
-            getDefaultPermissionMode(agenticTool);
+            userToolDefaults?.permissionMode || getDefaultPermissionMode(agenticTool);
           const permissionMode = mapPermissionMode(requestedMode, agenticTool);
 
           // Build permission config (including Codex-specific settings if applicable)
@@ -1560,7 +1407,8 @@ export function setupMCPRoutes(app: Application): void {
             };
           }
 
-          // Build model config (if user has defaults for this tool and a model is specified)
+          // Build model config from user defaults (only if a model is specified)
+          // Other fields like thinkingMode require a model context to be meaningful
           let modelConfig: Record<string, unknown> | undefined;
           if (userToolDefaults?.modelConfig?.model) {
             modelConfig = {
@@ -1572,9 +1420,8 @@ export function setupMCPRoutes(app: Application): void {
             };
           }
 
-          // Determine MCP server IDs to attach
-          // Priority: explicit param > user defaults > empty array
-          const mcpServerIds = args.mcpServerIds || userToolDefaults?.mcpServerIds || [];
+          // Determine MCP server IDs from user defaults only
+          const mcpServerIds = userToolDefaults?.mcpServerIds || [];
 
           // Create session
           const sessionData: Record<string, unknown> = {
@@ -1601,7 +1448,7 @@ export function setupMCPRoutes(app: Application): void {
           const session = await app.service('sessions').create(sessionData, baseServiceParams);
           console.log(`✅ Session created: ${session.session_id.substring(0, 8)}`);
 
-          // Attach MCP servers (from explicit param or user defaults)
+          // Attach MCP servers from user defaults
           if (mcpServerIds && mcpServerIds.length > 0) {
             for (const mcpServerId of mcpServerIds) {
               await app.service('session-mcp-servers').create(
@@ -1664,14 +1511,14 @@ export function setupMCPRoutes(app: Application): void {
           }
 
           // Validate at least one field is provided
-          if (!args.title && !args.description && !args.status && !args.permissionMode) {
+          if (!args.title && !args.description && !args.status) {
             return res.status(400).json({
               jsonrpc: '2.0',
               id: mcpRequest.id,
               error: {
                 code: -32602,
                 message:
-                  'Invalid params: at least one field (title, description, status, permissionMode) must be provided',
+                  'Invalid params: at least one field (title, description, status) must be provided',
               },
             });
           }
@@ -1683,19 +1530,6 @@ export function setupMCPRoutes(app: Application): void {
           if (args.title !== undefined) updates.title = args.title;
           if (args.description !== undefined) updates.description = args.description;
           if (args.status !== undefined) updates.status = args.status;
-
-          // Handle permission mode update
-          if (args.permissionMode !== undefined) {
-            const currentSession = await app
-              .service('sessions')
-              .get(args.sessionId, baseServiceParams);
-            const { mapPermissionMode } = await import('@agor/core/utils/permission-mode-mapper');
-            const mappedMode = mapPermissionMode(args.permissionMode, currentSession.agentic_tool);
-            updates.permission_config = {
-              ...currentSession.permission_config,
-              mode: mappedMode,
-            };
-          }
 
           // Update session
           const session = await app
@@ -2504,7 +2338,8 @@ export function setupMCPRoutes(app: Application): void {
                   };
                 }
 
-                // Build model config from user defaults
+                // Build model config from user defaults (only if a model is specified)
+                // Other fields like thinkingMode require a model context to be meaningful
                 let modelConfig: Record<string, unknown> | undefined;
                 if (userToolDefaults?.modelConfig?.model) {
                   modelConfig = {
