@@ -193,32 +193,14 @@ export async function checkMigrationStatus(
       appliedHashes = result.map((row: Record<string, unknown>) => String(row.hash));
     }
 
-    // Use applied hashes as-is
-    const normalizedAppliedHashes = appliedHashes;
-
-    // Strategy: If we have N migrations in journal and N hashes in DB, consider all applied
-    // (even if one hash changed). This handles the case where a migration was modified
-    // after being applied, which is safe if the modification is idempotent (IF NOT EXISTS).
-    const numExpected = expectedMigrations.length;
-    const numApplied = normalizedAppliedHashes.length;
-
-    if (numApplied >= numExpected) {
-      // All migrations accounted for (might have extra hashes from modified migrations)
-      return {
-        hasPending: false,
-        pending: [],
-        applied: expectedMigrations.map((m) => m.tag),
-      };
-    }
-
-    // Find pending migrations (hash not in database, after normalization)
+    // Find pending migrations (hash not in database)
     const pending = expectedMigrations
-      .filter((m) => !normalizedAppliedHashes.includes(m.hash))
+      .filter((m) => !appliedHashes.includes(m.hash))
       .map((m) => m.tag);
 
-    // Find applied migration tags (hash exists in database, after normalization)
+    // Find applied migration tags (hash exists in database)
     const appliedTags = expectedMigrations
-      .filter((m) => normalizedAppliedHashes.includes(m.hash))
+      .filter((m) => appliedHashes.includes(m.hash))
       .map((m) => m.tag);
 
     return {
