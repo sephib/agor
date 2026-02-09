@@ -171,6 +171,11 @@ export class GatewayService {
         description: data.text,
         worktree_id: channel.target_worktree_id,
         created_by: channel.agor_user_id,
+        // Stamp session with creator's unix_username for executor impersonation.
+        // Normally set by the setSessionUnixUsername hook, but that hook skips
+        // internal calls (no provider). Gateway sessions are internal, so we
+        // must set it explicitly using the channel owner's user record.
+        unix_username: user.unix_username ?? null,
         status: SessionStatus.IDLE,
         agentic_tool: agenticTool,
         permission_config: { mode: permissionMode },
