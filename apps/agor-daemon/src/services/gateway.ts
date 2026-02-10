@@ -216,11 +216,26 @@ export class GatewayService {
         metadata: data.metadata ?? null,
       });
 
-      this.sendDebugMessage(
-        channel,
-        data.thread_id,
-        `Session ${sessionId.substring(0, 8)} created, sending prompt to agent...`
-      );
+      // Get session URL from created session (URL is added by after hook)
+      // Fetch the session to get the URL property
+      let sessionUrl: string | null = null;
+      try {
+        const sessionsService = this.app.service('sessions') as {
+          get: (id: string, params?: { user: User }) => Promise<Session & { url?: string | null }>;
+        };
+        const sessionWithUrl = await sessionsService.get(sessionId, { user });
+        sessionUrl = sessionWithUrl.url || null;
+      } catch (error) {
+        console.warn('[gateway] Failed to fetch session URL:', error);
+      }
+
+      // Send debug message with session URL
+      const sessionIdShort = sessionId.substring(0, 8);
+      const message = sessionUrl
+        ? `Session created: ${sessionUrl}`
+        : `Session ${sessionIdShort} created, sending prompt to agent...`;
+
+      this.sendDebugMessage(channel, data.thread_id, message);
     }
 
     // Touch channel last_message_at

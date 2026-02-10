@@ -176,6 +176,14 @@ export interface Board {
    * Access in templates: {{ board.context.team }}
    */
   custom_context?: Record<string, unknown>;
+
+  /**
+   * External/user-facing URL for viewing this board in the UI
+   *
+   * Computed property added by API hooks.
+   * Format: {baseUrl}/b/{boardId}/
+   */
+  url: string;
 }
 
 /**

@@ -10,7 +10,7 @@ import type {
   OpenCodePermissionMode,
 } from './agentic-tool';
 import type { ContextFilePath } from './context';
-import type { SessionID, TaskID, WorktreeID } from './id';
+import type { BoardID, SessionID, TaskID, WorktreeID } from './id';
 
 export const SessionStatus = {
   IDLE: 'idle',
@@ -132,6 +132,24 @@ export interface Session {
 
   /** Worktree ID - all sessions must be associated with an Agor-managed worktree */
   worktree_id: WorktreeID;
+
+  /**
+   * Board ID from the session's worktree (populated via LEFT JOIN)
+   *
+   * This is a computed property populated by the repository layer when fetching sessions.
+   * It avoids N+1 queries by joining with the worktrees table.
+   * Null if the worktree is not placed on any board.
+   */
+  worktree_board_id?: BoardID | null;
+
+  /**
+   * External/user-facing URL for viewing this session in the UI
+   *
+   * Computed property added by API hooks based on worktree_board_id.
+   * Format: {baseUrl}/b/{boardId}/{sessionId}/
+   * Null if the worktree is not on a board.
+   */
+  url: string | null;
 
   // Git state
   git_state: {
