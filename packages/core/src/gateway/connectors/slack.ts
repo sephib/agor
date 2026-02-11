@@ -39,6 +39,9 @@ interface SlackConfig {
   require_mention?: boolean;
   allow_thread_replies_without_mention?: boolean;
   allowed_channel_ids?: string[];
+
+  // User alignment: resolve Slack user email → Agor user
+  align_slack_users?: boolean;
 }
 
 /**
@@ -96,6 +99,11 @@ export class SlackConnector implements GatewayConnector {
   private config: SlackConfig;
   private botUserId: string | null = null;
 
+  /** Cache: Slack user ID → email (or null if unavailable). */
+  private userEmailCache = new Map<string, { email: string | null; expiresAt: number }>();
+  private static USER_CACHE_TTL_MS = 15 * 60 * 1000; // 15 min for successful lookups
+  private static USER_CACHE_ERROR_TTL_MS = 60 * 1000; // 1 min for errors (transient recovery)
+
   constructor(config: Record<string, unknown>) {
     this.config = config as unknown as SlackConfig;
 
@@ -107,6 +115,58 @@ export class SlackConnector implements GatewayConnector {
     // Initialization - tokens validated during startListening
 
     this.web = new WebClient(this.config.bot_token);
+  }
+
+  /**
+   * Look up a Slack user's email address by their user ID.
+   *
+   * Caches successful results for 15 minutes and errors for 1 minute
+   * (so transient failures recover quickly). Evicts expired entries on
+   * each call to prevent unbounded cache growth.
+   *
+   * Returns null if the email is unavailable (missing users:read.email scope,
+   * bot user, restricted guest, or API error).
+   */
+  async lookupUserEmail(slackUserId: string): Promise<string | null> {
+    const now = Date.now();
+
+    // Evict expired entries to prevent unbounded growth
+    for (const [key, entry] of this.userEmailCache) {
+      if (entry.expiresAt <= now) this.userEmailCache.delete(key);
+    }
+
+    const cached = this.userEmailCache.get(slackUserId);
+    if (cached && cached.expiresAt > now) {
+      return cached.email;
+    }
+
+    try {
+      const result = await this.web.users.info({ user: slackUserId });
+      const email = result.user?.profile?.email ?? null;
+
+      this.userEmailCache.set(slackUserId, {
+        email,
+        expiresAt: now + SlackConnector.USER_CACHE_TTL_MS,
+      });
+
+      if (email) {
+        console.log(`[slack] Resolved user ${slackUserId} → ${email}`);
+      } else {
+        console.log(
+          `[slack] User ${slackUserId} has no email (missing users:read.email scope or restricted account)`
+        );
+      }
+
+      return email;
+    } catch (error) {
+      console.warn(`[slack] Failed to look up email for user ${slackUserId}:`, error);
+      // Short TTL for errors so transient failures (rate limits, network) recover quickly
+      this.userEmailCache.set(slackUserId, {
+        email: null,
+        expiresAt: now + SlackConnector.USER_CACHE_ERROR_TTL_MS,
+      });
+      return null;
+    }
   }
 
   /**
@@ -380,6 +440,12 @@ export class SlackConnector implements GatewayConnector {
         `[slack] Inbound message: thread=${threadId} channel_type=${channelType} user=${event.user}`
       );
 
+      // Resolve Slack user email if align_slack_users is enabled
+      let slackUserEmail: string | null = null;
+      if (this.config.align_slack_users && event.user) {
+        slackUserEmail = await this.lookupUserEmail(event.user);
+      }
+
       callback({
         threadId,
         text: messageText,
@@ -389,6 +455,7 @@ export class SlackConnector implements GatewayConnector {
           channel: event.channel,
           channel_type: event.channel_type,
           requires_mapping_verification: allowedViaThreadReplyException,
+          ...(slackUserEmail ? { slack_user_email: slackUserEmail } : {}),
         },
       });
     });
