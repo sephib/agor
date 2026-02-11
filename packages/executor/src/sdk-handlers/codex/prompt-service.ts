@@ -17,7 +17,9 @@ import type { Thread, ThreadItem } from '@agor/core/sdk';
 import { Codex } from '@agor/core/sdk';
 import { renderAgorSystemPrompt } from '@agor/core/templates/session-context';
 import { type JsonMap, parse as parseToml, stringify as stringifyToml } from '@iarna/toml';
+import { getDaemonUrl } from '../../config.js';
 import type {
+  MCPServerRepository,
   MessagesRepository,
   RepoRepository,
   SessionMCPServerRepository,
@@ -26,6 +28,7 @@ import type {
 } from '../../db/feathers-repositories.js';
 import type { TokenUsage } from '../../types/token-usage.js';
 import type { PermissionMode, SessionID, TaskID } from '../../types.js';
+import { getMcpServersForSession } from '../base/mcp-scoping.js';
 import { DEFAULT_CODEX_MODEL } from './models.js';
 import { extractCodexTokenUsage } from './usage.js';
 
@@ -125,7 +128,8 @@ export class CodexPromptService {
     private sessionMCPServerRepo?: SessionMCPServerRepository,
     private worktreesRepo?: WorktreeRepository,
     private reposRepo?: RepoRepository,
-    apiKey?: string
+    apiKey?: string,
+    private mcpServerRepo?: MCPServerRepository
   ) {
     // Store API key from base-executor (already resolved with proper precedence)
     this.apiKey = apiKey || '';
@@ -213,53 +217,66 @@ export class CodexPromptService {
    * (not available in ThreadOptions). We minimize file writes by tracking a hash
    * of the configuration and only updating when it changes.
    *
+   * Codex supports two MCP transport types in config.toml:
+   * - STDIO: `command` + `args` + `env` fields
+   * - Streamable HTTP: `url` + optional `bearer_token_env_var` / `http_headers` / `env_http_headers`
+   *
+   * The built-in Agor MCP server is automatically configured as a streamable HTTP server,
+   * enabling Codex agents to access Agor resources (sessions, worktrees, boards, etc.)
+   *
    * @param approvalPolicy - Codex approval policy (untrusted, on-request, on-failure, never)
    * @param networkAccess - Whether to allow outbound network access in workspace-write mode
    * @param sessionId - Session ID for fetching MCP servers
    * @param codexHome - Path to CODEX_HOME directory (per-session or global)
+   * @param mcpToken - Optional MCP authentication token for the built-in Agor MCP server
    * @returns Number of MCP servers configured
    */
   private async ensureCodexConfig(
     approvalPolicy: 'untrusted' | 'on-request' | 'on-failure' | 'never',
     networkAccess: boolean,
     sessionId: SessionID,
-    codexHome: string
+    codexHome: string,
+    mcpToken?: string
   ): Promise<number> {
-    // Fetch MCP servers for this session (if repository is available)
+    // Fetch MCP servers for this session using shared scoping utility
+    // This includes both global-scoped and session-assigned servers with template resolution
     console.log(`🔍 [Codex MCP] Fetching MCP servers for session ${sessionId.substring(0, 8)}...`);
-    if (!this.sessionMCPServerRepo) {
-      console.warn('⚠️  [Codex MCP] SessionMCPServerRepository not available!');
-    }
-    const mcpServers = this.sessionMCPServerRepo
-      ? await this.sessionMCPServerRepo.listServers(sessionId, true) // enabledOnly = true
-      : [];
+
+    const serversWithSource = await getMcpServersForSession(sessionId, {
+      sessionMCPRepo: this.sessionMCPServerRepo,
+      mcpServerRepo: this.mcpServerRepo,
+    });
+
+    const mcpServers = serversWithSource.map((s) => s.server);
 
     console.log(`📊 [Codex MCP] Found ${mcpServers.length} MCP server(s) for session`);
     if (mcpServers.length > 0) {
       console.log(`   Servers: ${mcpServers.map((s) => `${s.name} (${s.transport})`).join(', ')}`);
     }
 
-    // Filter MCP servers: Codex ONLY supports stdio transport (not HTTP/SSE)
+    // Categorize servers by transport type
+    // Codex supports both STDIO and streamable HTTP transports
     const stdioServers = mcpServers.filter((s) => s.transport === 'stdio');
-    const unsupportedServers = mcpServers.filter((s) => s.transport !== 'stdio');
+    const httpServers = mcpServers.filter((s) => s.transport === 'http' || s.transport === 'sse');
 
-    if (unsupportedServers.length > 0) {
-      console.warn(
-        `⚠️  [Codex MCP] ${unsupportedServers.length} MCP server(s) skipped - Codex only supports STDIO transport:`
-      );
-      for (const server of unsupportedServers) {
-        console.warn(`   ❌ ${server.name} (${server.transport}) - not supported by Codex`);
-      }
-    }
+    console.log(
+      `   📊 [Codex MCP] Transport breakdown: ${stdioServers.length} STDIO, ${httpServers.length} HTTP/SSE`
+    );
 
-    // Create hash to detect changes (include network access in hash)
-    const configHash = `${approvalPolicy}:${networkAccess}:${JSON.stringify(stdioServers.map((s) => s.mcp_server_id))}`;
+    // Create hash to detect changes
+    // Include server config fields (not just IDs) so URL/command/auth changes trigger a rewrite
+    const serverFingerprints = mcpServers
+      .map(
+        (s) =>
+          `${s.mcp_server_id}:${s.transport}:${s.url || ''}:${s.command || ''}:${JSON.stringify(s.args || [])}:${s.auth?.token || ''}`
+      )
+      .sort();
+    const configHash = `${approvalPolicy}:${networkAccess}:${mcpToken || ''}:${JSON.stringify(serverFingerprints)}`;
 
-    // Note: codexHome is now passed as parameter (per-session or global)
     // Skip if config and target directory haven't changed (avoid unnecessary file I/O)
     if (this.lastMCPServersHash === configHash && this.lastCodexHome === codexHome) {
       console.log(`✅ [Codex MCP] Config unchanged, skipping write`);
-      return stdioServers.length;
+      return stdioServers.length + httpServers.length + (mcpToken ? 1 : 0);
     }
 
     const configPath = path.join(codexHome, 'config.toml');
@@ -315,12 +332,35 @@ export class CodexPromptService {
 
     const managedServerNames = new Set<string>();
 
+    // Configure built-in Agor MCP server (streamable HTTP)
+    if (mcpToken) {
+      const daemonUrl = await getDaemonUrl();
+      const agorMcpUrl = `${daemonUrl}/mcp?sessionToken=${encodeURIComponent(mcpToken)}`;
+
+      managedServerNames.add('agor');
+      mcpServersConfig.agor = {
+        url: agorMcpUrl,
+        required: false,
+      } as JsonMap;
+      console.log(
+        `   📝 [Codex MCP] Configuring built-in Agor MCP server (HTTP) at ${daemonUrl}/mcp`
+      );
+    }
+
+    // Configure STDIO MCP servers
     for (const server of stdioServers) {
-      const serverName = server.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      let serverName = server.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      // Reserve 'agor' for the built-in Agor MCP server
+      if (serverName === 'agor') {
+        serverName = 'user_agor';
+        console.warn(
+          `   ⚠️  [Codex MCP] Server "${server.name}" conflicts with built-in Agor MCP server, renamed to "${serverName}"`
+        );
+      }
       managedServerNames.add(serverName);
 
       const serverConfig: JsonMap = {};
-      console.log(`   📝 [Codex MCP] Configuring server: ${server.name} -> ${serverName}`);
+      console.log(`   📝 [Codex MCP] Configuring STDIO server: ${server.name} -> ${serverName}`);
       if (server.command) {
         serverConfig.command = server.command;
         console.log(`      command: ${server.command}`);
@@ -332,6 +372,40 @@ export class CodexPromptService {
       if (server.env && Object.keys(server.env).length > 0) {
         serverConfig.env = server.env;
         console.log(`      env vars: ${Object.keys(server.env).length} variable(s)`);
+      }
+
+      mcpServersConfig[serverName] = serverConfig;
+    }
+
+    // Configure HTTP/SSE MCP servers (streamable HTTP transport)
+    for (const server of httpServers) {
+      let serverName = server.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      // Reserve 'agor' for the built-in Agor MCP server
+      if (serverName === 'agor') {
+        serverName = 'user_agor';
+        console.warn(
+          `   ⚠️  [Codex MCP] Server "${server.name}" conflicts with built-in Agor MCP server, renamed to "${serverName}"`
+        );
+      }
+      managedServerNames.add(serverName);
+
+      const serverConfig: JsonMap = {};
+      console.log(`   📝 [Codex MCP] Configuring HTTP server: ${server.name} -> ${serverName}`);
+      if (server.url) {
+        serverConfig.url = server.url;
+        console.log(`      url: ${server.url}`);
+      }
+
+      // Handle authentication for HTTP servers
+      // Codex supports bearer_token_env_var, http_headers, and env_http_headers
+      // Note: 'env' field is only valid for STDIO servers in Codex config.toml
+      if (server.auth?.type === 'bearer' && server.auth.token) {
+        // Inject resolved bearer token via a session-scoped env var
+        // Include sessionId to avoid collisions between concurrent sessions
+        const envVarName = `AGOR_MCP_${sessionId.substring(0, 8)}_${serverName.toUpperCase()}`;
+        process.env[envVarName] = server.auth.token;
+        serverConfig.bearer_token_env_var = envVarName;
+        console.log(`      auth: bearer token via ${envVarName}`);
       }
 
       mcpServersConfig[serverName] = serverConfig;
@@ -380,13 +454,21 @@ export class CodexPromptService {
 
     // Reinitialize Codex SDK to pick up the new config
     this.reinitializeCodex();
-    if (stdioServers.length > 0) {
+
+    const totalConfigured = stdioServers.length + httpServers.length + (mcpToken ? 1 : 0);
+    if (totalConfigured > 0) {
+      const parts: string[] = [];
+      if (mcpToken) parts.push('Agor (HTTP)');
+      if (stdioServers.length > 0)
+        parts.push(`${stdioServers.length} STDIO (${stdioServers.map((s) => s.name).join(', ')})`);
+      if (httpServers.length > 0)
+        parts.push(`${httpServers.length} HTTP (${httpServers.map((s) => s.name).join(', ')})`);
       console.log(
-        `✅ [Codex MCP] Configured ${stdioServers.length} STDIO MCP server(s): ${stdioServers.map((s) => s.name).join(', ')}`
+        `✅ [Codex MCP] Configured ${totalConfigured} MCP server(s): ${parts.join(', ')}`
       );
     }
 
-    return stdioServers.length;
+    return totalConfigured;
   }
 
   /**
@@ -515,26 +597,26 @@ export class CodexPromptService {
     // Set CODEX_HOME for this session (Codex SDK will use it)
     process.env.CODEX_HOME = sessionCodexHome;
 
-    // Set approval_policy, network_access, and MCP servers in config.toml (required because they're not available in ThreadOptions)
+    // Set approval_policy, network_access, and MCP servers in config.toml
+    // Also configures the built-in Agor MCP server (streamable HTTP) if MCP token is available
+    const mcpToken = session.mcp_token;
+    if (!mcpToken) {
+      console.warn(
+        `⚠️  No MCP token found for session ${sessionId.substring(0, 8)} - Agor MCP tools unavailable`
+      );
+    }
+
     const mcpServerCount = await this.ensureCodexConfig(
       approvalPolicy,
       networkAccess,
       sessionId,
-      sessionCodexHome // Pass per-session CODEX_HOME
+      sessionCodexHome, // Pass per-session CODEX_HOME
+      mcpToken // Pass MCP token for built-in Agor MCP server
     );
 
-    const totalMcpServers = this.sessionMCPServerRepo
-      ? (await this.sessionMCPServerRepo.listServers(sessionId, true)).length
-      : 0;
-    if (mcpServerCount < totalMcpServers) {
-      console.log(
-        `   Configured: sandboxMode=${sandboxMode}, approval_policy + ${mcpServerCount} STDIO MCP servers via config.toml (${totalMcpServers - mcpServerCount} HTTP/SSE servers skipped)`
-      );
-    } else {
-      console.log(
-        `   Configured: sandboxMode=${sandboxMode}, approval_policy + ${mcpServerCount} MCP server(s) via config.toml`
-      );
-    }
+    console.log(
+      `   Configured: sandboxMode=${sandboxMode}, approval_policy + ${mcpServerCount} MCP server(s) via config.toml`
+    );
 
     // Fetch worktree to get working directory
     const worktree = this.worktreesRepo
@@ -931,6 +1013,14 @@ export class CodexPromptService {
       // Directory may not exist if session never ran - that's ok
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.warn(`⚠️  Failed to remove per-session CODEX_HOME:`, error);
+      }
+    }
+
+    // Clean up session-scoped MCP bearer token env vars
+    const envPrefix = `AGOR_MCP_${sessionId.substring(0, 8)}_`;
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith(envPrefix)) {
+        delete process.env[key];
       }
     }
 
