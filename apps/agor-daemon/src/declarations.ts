@@ -22,6 +22,7 @@ import type {
   Worktree,
   WorktreeID,
 } from '@agor/core/types';
+import type { ExecuteTaskData } from './services/sessions.js';
 
 // Re-export core types for convenience
 export type AuthenticatedUser = CoreAuthenticatedUser;
@@ -62,12 +63,7 @@ export interface SessionsServiceImpl extends Service<Session, Partial<Session>, 
   setExecuteHandler(
     handler: (
       sessionId: string,
-      data: {
-        taskId: string;
-        prompt: string;
-        permissionMode?: import('@agor/core/types').PermissionMode;
-        stream?: boolean;
-      },
+      data: ExecuteTaskData,
       params?: FeathersParams
     ) => Promise<{
       success: boolean;
@@ -78,12 +74,7 @@ export interface SessionsServiceImpl extends Service<Session, Partial<Session>, 
   ): void;
   executeTask(
     id: string,
-    data: {
-      taskId: string;
-      prompt: string;
-      permissionMode?: import('@agor/core/types').PermissionMode;
-      stream?: boolean;
-    },
+    data: ExecuteTaskData,
     params?: FeathersParams
   ): Promise<{
     success: boolean;

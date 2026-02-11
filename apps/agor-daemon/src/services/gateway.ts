@@ -15,7 +15,14 @@ import {
 import type { Application } from '@agor/core/feathers';
 import type { GatewayConnector, InboundMessage } from '@agor/core/gateway';
 import { getConnector, hasConnector } from '@agor/core/gateway';
-import type { AgenticToolName, ChannelType, GatewayChannel, Session, User } from '@agor/core/types';
+import type {
+  AgenticToolName,
+  ChannelType,
+  GatewayChannel,
+  MessageSource,
+  Session,
+  User,
+} from '@agor/core/types';
 import { getDefaultPermissionMode, SessionStatus } from '@agor/core/types';
 
 /**
@@ -340,14 +347,15 @@ export class GatewayService {
         // Session is idle → send prompt directly
         const promptService = this.app.service('/sessions/:id/prompt') as {
           create: (
-            data: { prompt: string; permissionMode?: string },
+            data: { prompt: string; permissionMode?: string; messageSource?: MessageSource },
             params: Record<string, unknown>
           ) => Promise<Record<string, unknown>>;
         };
 
         // Internal call: pass user, omit provider to bypass auth hooks
+        // Mark message source as 'gateway' so it won't be echoed back to Slack
         await promptService.create(
-          { prompt: data.text, permissionMode },
+          { prompt: data.text, permissionMode, messageSource: 'gateway' },
           { route: { id: sessionId }, user }
         );
 

@@ -8,7 +8,13 @@
  * 4. Exits when task completes
  */
 
-import type { PermissionMode, PermissionScope, SessionID, TaskID } from '@agor/core/types';
+import type {
+  MessageSource,
+  PermissionMode,
+  PermissionScope,
+  SessionID,
+  TaskID,
+} from '@agor/core/types';
 import { globalPermissionManager } from './permissions/permission-manager.js';
 import { type AgorClient, createFeathersClient } from './services/feathers-client.js';
 
@@ -20,6 +26,7 @@ export interface ExecutorConfig {
   tool: 'claude-code' | 'gemini' | 'codex' | 'opencode';
   permissionMode?: PermissionMode;
   daemonUrl: string;
+  messageSource?: MessageSource;
 }
 
 export class AgorExecutor {
@@ -181,6 +188,7 @@ export class AgorExecutor {
       prompt: this.config.prompt,
       permissionMode: this.config.permissionMode,
       abortController: this.abortController,
+      messageSource: this.config.messageSource,
     });
 
     this.isRunning = false;

@@ -24,6 +24,18 @@ export type SessionParams = QueryParams<{
 }>;
 
 /**
+ * Execute task data payload
+ * Used by setExecuteHandler, executeTask, and related methods
+ */
+export type ExecuteTaskData = {
+  taskId: string;
+  prompt: string;
+  permissionMode?: import('@agor/core/types').PermissionMode;
+  stream?: boolean;
+  messageSource?: import('@agor/core/types').MessageSource;
+};
+
+/**
  * Parse and validate last_message_truncation_length parameter
  * Feathers delivers query params as strings, so we need to parse and validate
  */
@@ -306,11 +318,7 @@ export class SessionsService extends DrizzleService<Session, Partial<Session>, S
    */
   private executeHandler?: (
     sessionId: string,
-    data: {
-      prompt: string;
-      permissionMode?: import('@agor/core/types').PermissionMode;
-      stream?: boolean;
-    },
+    data: ExecuteTaskData,
     params?: SessionParams
   ) => Promise<{
     success: boolean;
@@ -322,11 +330,7 @@ export class SessionsService extends DrizzleService<Session, Partial<Session>, S
   setExecuteHandler(
     handler: (
       sessionId: string,
-      data: {
-        prompt: string;
-        permissionMode?: import('@agor/core/types').PermissionMode;
-        stream?: boolean;
-      },
+      data: ExecuteTaskData,
       params?: SessionParams
     ) => Promise<{
       success: boolean;
@@ -340,11 +344,7 @@ export class SessionsService extends DrizzleService<Session, Partial<Session>, S
 
   async executeTask(
     id: string,
-    data: {
-      prompt: string;
-      permissionMode?: import('@agor/core/types').PermissionMode;
-      stream?: boolean;
-    },
+    data: ExecuteTaskData,
     params?: SessionParams
   ): Promise<{
     success: boolean;

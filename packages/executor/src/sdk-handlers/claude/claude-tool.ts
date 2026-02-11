@@ -29,6 +29,7 @@ import {
   type Message,
   type MessageID,
   MessageRole,
+  type MessageSource,
   type PermissionMode,
   type SessionID,
   type TaskID,
@@ -209,7 +210,8 @@ export class ClaudeTool implements ITool {
     taskId?: TaskID,
     permissionMode?: PermissionMode,
     streamingCallbacks?: import('../base').StreamingCallbacks,
-    abortController?: AbortController
+    abortController?: AbortController,
+    messageSource?: MessageSource
   ): Promise<{
     userMessageId: MessageID;
     assistantMessageIds: MessageID[];
@@ -241,7 +243,8 @@ export class ClaudeTool implements ITool {
       prompt,
       taskId,
       nextIndex++,
-      this.messagesService!
+      this.messagesService!,
+      messageSource
     );
 
     // Execute prompt via Agent SDK with streaming
@@ -651,7 +654,8 @@ export class ClaudeTool implements ITool {
     sessionId: SessionID,
     prompt: string,
     taskId?: TaskID,
-    permissionMode?: PermissionMode
+    permissionMode?: PermissionMode,
+    messageSource?: MessageSource
   ): Promise<{
     userMessageId: MessageID;
     assistantMessageIds: MessageID[];
@@ -683,7 +687,8 @@ export class ClaudeTool implements ITool {
       prompt,
       taskId,
       nextIndex++,
-      this.messagesService!
+      this.messagesService!,
+      messageSource
     );
 
     // Execute prompt via Agent SDK

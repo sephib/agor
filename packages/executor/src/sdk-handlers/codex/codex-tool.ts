@@ -22,6 +22,7 @@ import {
   type Message,
   type MessageID,
   MessageRole,
+  type MessageSource,
   type PermissionMode,
   type SessionID,
   type TaskID,
@@ -122,7 +123,8 @@ export class CodexTool implements ITool {
     taskId?: TaskID,
     permissionMode?: PermissionMode,
     streamingCallbacks?: StreamingCallbacks,
-    abortController?: AbortController
+    abortController?: AbortController,
+    messageSource?: MessageSource
   ): Promise<CodexExecutionResult> {
     if (!this.promptService || !this.messagesRepo) {
       throw new Error('CodexTool not initialized with repositories for live execution');
@@ -137,7 +139,13 @@ export class CodexTool implements ITool {
     let nextIndex = existingMessages.length;
 
     // Create user message
-    const userMessage = await this.createUserMessage(sessionId, prompt, taskId, nextIndex++);
+    const userMessage = await this.createUserMessage(
+      sessionId,
+      prompt,
+      taskId,
+      nextIndex++,
+      messageSource
+    );
 
     // Execute prompt via Codex SDK with streaming
     const assistantMessageIds: MessageID[] = [];
@@ -324,7 +332,8 @@ export class CodexTool implements ITool {
     sessionId: SessionID,
     prompt: string,
     taskId: TaskID | undefined,
-    nextIndex: number
+    nextIndex: number,
+    messageSource?: MessageSource
   ): Promise<Message> {
     const userMessage: Message = {
       message_id: generateId() as MessageID,
@@ -336,6 +345,7 @@ export class CodexTool implements ITool {
       content_preview: prompt.substring(0, 200),
       content: prompt,
       task_id: taskId,
+      metadata: messageSource ? { source: messageSource } : undefined,
     };
 
     await this.messagesService?.create(userMessage);
@@ -425,7 +435,8 @@ export class CodexTool implements ITool {
     sessionId: SessionID,
     prompt: string,
     taskId?: TaskID,
-    permissionMode?: PermissionMode
+    permissionMode?: PermissionMode,
+    messageSource?: MessageSource
   ): Promise<CodexExecutionResult> {
     if (!this.promptService || !this.messagesRepo) {
       throw new Error('CodexTool not initialized with repositories for live execution');
@@ -440,7 +451,13 @@ export class CodexTool implements ITool {
     let nextIndex = existingMessages.length;
 
     // Create user message
-    const userMessage = await this.createUserMessage(sessionId, prompt, taskId, nextIndex++);
+    const userMessage = await this.createUserMessage(
+      sessionId,
+      prompt,
+      taskId,
+      nextIndex++,
+      messageSource
+    );
 
     // Execute prompt via Codex SDK
     const assistantMessageIds: MessageID[] = [];
