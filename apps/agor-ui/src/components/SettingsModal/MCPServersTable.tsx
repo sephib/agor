@@ -29,124 +29,9 @@ import {
 import { useEffect, useState } from 'react';
 import { mapToArray } from '@/utils/mapHelpers';
 import { useThemedMessage } from '@/utils/message';
+import { extractOAuthConfig, extractOAuthConfigForTesting } from './mcp-oauth-utils';
 
 const { TextArea } = Input;
-
-/**
- * Check if a value contains a template variable (e.g., {{ user.env.VAR }})
- */
-function isTemplateValue(value: string | undefined): boolean {
-  if (!value) return false;
-  return value.includes('{{') && value.includes('}}');
-}
-
-/**
- * Extract OAuth configuration from form values
- * Only includes fields that have actual values (not empty or template-only)
- */
-function extractOAuthConfig(values: Record<string, unknown>): {
-  oauth_token_url?: string;
-  oauth_client_id?: string;
-  oauth_client_secret?: string;
-  oauth_scope?: string;
-  oauth_grant_type?: string;
-} {
-  const config: {
-    oauth_token_url?: string;
-    oauth_client_id?: string;
-    oauth_client_secret?: string;
-    oauth_scope?: string;
-    oauth_grant_type?: string;
-  } = {};
-
-  // Only include token URL if it's provided (can be template or real value)
-  if (values.oauth_token_url && typeof values.oauth_token_url === 'string') {
-    config.oauth_token_url = values.oauth_token_url;
-  }
-
-  // Only include client ID if it's provided
-  if (values.oauth_client_id && typeof values.oauth_client_id === 'string') {
-    config.oauth_client_id = values.oauth_client_id;
-  }
-
-  // Only include client secret if it's provided
-  if (values.oauth_client_secret && typeof values.oauth_client_secret === 'string') {
-    config.oauth_client_secret = values.oauth_client_secret;
-  }
-
-  // Only include scope if it's provided
-  if (values.oauth_scope && typeof values.oauth_scope === 'string') {
-    config.oauth_scope = values.oauth_scope;
-  }
-
-  // Grant type defaults to client_credentials
-  config.oauth_grant_type =
-    typeof values.oauth_grant_type === 'string' ? values.oauth_grant_type : 'client_credentials';
-
-  return config;
-}
-
-/**
- * Extract OAuth configuration for testing (excludes template values for credentials)
- * Template values in credentials can't be tested directly as they need resolution
- */
-function extractOAuthConfigForTesting(values: Record<string, unknown>): {
-  mcp_url: string;
-  token_url?: string;
-  client_id?: string;
-  client_secret?: string;
-  scope?: string;
-  grant_type?: string;
-} | null {
-  if (!values.url || typeof values.url !== 'string') {
-    return null;
-  }
-
-  const config: {
-    mcp_url: string;
-    token_url?: string;
-    client_id?: string;
-    client_secret?: string;
-    scope?: string;
-    grant_type?: string;
-  } = {
-    mcp_url: values.url,
-  };
-
-  // Include token URL even if it's a template (will be resolved server-side or auto-detected)
-  if (values.oauth_token_url && typeof values.oauth_token_url === 'string') {
-    config.token_url = values.oauth_token_url;
-  }
-
-  // Only include credentials if they're NOT templates (templates can't be tested directly)
-  if (
-    values.oauth_client_id &&
-    typeof values.oauth_client_id === 'string' &&
-    !isTemplateValue(values.oauth_client_id)
-  ) {
-    config.client_id = values.oauth_client_id;
-  }
-
-  if (
-    values.oauth_client_secret &&
-    typeof values.oauth_client_secret === 'string' &&
-    !isTemplateValue(values.oauth_client_secret)
-  ) {
-    config.client_secret = values.oauth_client_secret;
-  }
-
-  // Include scope if provided
-  if (values.oauth_scope && typeof values.oauth_scope === 'string') {
-    config.scope = values.oauth_scope;
-  }
-
-  // Include grant type if provided
-  if (values.oauth_grant_type && typeof values.oauth_grant_type === 'string') {
-    config.grant_type = values.oauth_grant_type;
-  }
-
-  return config;
-}
 
 interface MCPServersTableProps {
   mcpServerById: Map<string, MCPServer>;
@@ -177,6 +62,8 @@ interface MCPServerFormFieldsProps {
     resources?: Array<{ name: string; uri: string; mimeType?: string }>;
     prompts?: Array<{ name: string; description: string }>;
   } | null;
+  /** Callback to save server first before OAuth flow (for new servers) */
+  onSaveFirst?: () => Promise<string | null>;
 }
 
 const MCPServerFormFields: React.FC<MCPServerFormFieldsProps> = ({
@@ -191,17 +78,46 @@ const MCPServerFormFields: React.FC<MCPServerFormFieldsProps> = ({
   onTestConnection,
   testing = false,
   testResult,
+  onSaveFirst,
 }) => {
   const { showSuccess, showError, showWarning, showInfo } = useThemedMessage();
   const [testingAuth, setTestingAuth] = useState(false);
   const [oauthBrowserFlowAvailable, setOauthBrowserFlowAvailable] = useState(false);
   const [startingOAuthFlow, setStartingOAuthFlow] = useState(false);
 
-  // Start the browser-based OAuth 2.1 flow
+  // Two-phase OAuth flow state
+  const [oauthCallbackModalVisible, setOauthCallbackModalVisible] = useState(false);
+  const [oauthCallbackUrl, setOauthCallbackUrl] = useState('');
+  const [_oauthState, setOauthState] = useState<string | null>(null);
+  const [completingOAuth, setCompletingOAuth] = useState(false);
+  const [disconnectingOAuth, setDisconnectingOAuth] = useState(false);
+
+  // Track effective server ID (may differ from prop after onSaveFirst creates a new server)
+  const [effectiveServerId, setEffectiveServerId] = useState<string | undefined>(serverId);
+  useEffect(() => {
+    setEffectiveServerId(serverId);
+  }, [serverId]);
+
+  // Start the browser-based OAuth 2.1 flow (two-phase for remote daemon)
   const handleStartOAuthFlow = async () => {
     if (!client) {
       showError('Client not available');
       return;
+    }
+
+    // Track the target server ID (may be set after saving)
+    let targetServerId = effectiveServerId;
+
+    // If no serverId and we have onSaveFirst callback, save the server first
+    if (!targetServerId && onSaveFirst) {
+      showInfo('Saving MCP server before testing...');
+      const newServerId = await onSaveFirst();
+      if (!newServerId) {
+        showError('Failed to save MCP server');
+        return;
+      }
+      targetServerId = newServerId;
+      setEffectiveServerId(newServerId);
     }
 
     const values = form.getFieldsValue();
@@ -212,31 +128,109 @@ const MCPServerFormFields: React.FC<MCPServerFormFieldsProps> = ({
     }
 
     setStartingOAuthFlow(true);
-    try {
-      showInfo('Opening browser for OAuth authentication...');
 
-      const data = (await client.service('mcp-servers/test-oauth').create({
-        ...requestData,
-        ...(serverId ? { mcp_server_id: serverId } : {}), // Only pass server ID if already saved
-        start_browser_flow: true,
+    // Set up listener for oauth:open_browser event from daemon
+    const handleOpenBrowser = ({ authUrl }: { authUrl: string }) => {
+      console.log('[OAuth] Received open_browser event, opening:', authUrl);
+      window.open(authUrl, '_blank', 'noopener,noreferrer');
+    };
+    client.io.on('oauth:open_browser', handleOpenBrowser);
+
+    try {
+      showInfo('Starting OAuth authentication flow...');
+
+      // Use the new two-phase OAuth flow
+      const data = (await client.service('mcp-servers/oauth-start').create({
+        mcp_url: requestData.mcp_url,
+        mcp_server_id: targetServerId,
+        client_id: requestData.client_id,
       })) as {
         success: boolean;
         error?: string;
         message?: string;
-        tokenValid?: boolean;
-        mcpStatus?: number;
+        authorizationUrl?: string;
+        state?: string;
       };
 
-      if (data.success) {
-        showSuccess(data.message || 'OAuth 2.1 authentication successful!');
-        setOauthBrowserFlowAvailable(false); // Hide the button after success
+      if (data.success && data.state) {
+        // Store the state for completing the flow
+        setOauthState(data.state);
+        setOauthCallbackUrl('');
+        setOauthCallbackModalVisible(true);
+        showInfo('Browser opened. Complete authentication, then paste the callback URL.');
       } else {
-        showError(data.error || 'OAuth flow failed');
+        showError(data.error || 'Failed to start OAuth flow');
       }
     } catch (error) {
       showError(`OAuth flow error: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      client.io.off('oauth:open_browser', handleOpenBrowser);
       setStartingOAuthFlow(false);
+    }
+  };
+
+  // Complete OAuth flow with callback URL
+  const handleCompleteOAuthFlow = async () => {
+    if (!client || !oauthCallbackUrl.trim()) {
+      showError('Please paste the callback URL');
+      return;
+    }
+
+    setCompletingOAuth(true);
+    try {
+      const data = (await client.service('mcp-servers/oauth-complete').create({
+        callback_url: oauthCallbackUrl.trim(),
+      })) as {
+        success: boolean;
+        error?: string;
+        message?: string;
+      };
+
+      if (data.success) {
+        showSuccess(data.message || 'OAuth authentication successful!');
+        setOauthCallbackModalVisible(false);
+        setOauthBrowserFlowAvailable(false);
+        setOauthState(null);
+        setOauthCallbackUrl('');
+      } else {
+        showError(data.error || 'Failed to complete OAuth flow');
+      }
+    } catch (error) {
+      showError(`OAuth error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setCompletingOAuth(false);
+    }
+  };
+
+  // Disconnect OAuth - remove stored tokens
+  const handleDisconnectOAuth = async () => {
+    if (!client) {
+      showError('Client not available');
+      return;
+    }
+
+    if (!effectiveServerId) {
+      showError('Cannot disconnect: MCP server must be saved first');
+      return;
+    }
+
+    setDisconnectingOAuth(true);
+    try {
+      const data = (await client.service('mcp-servers/oauth-disconnect').create({
+        mcp_server_id: effectiveServerId,
+      })) as { success: boolean; message?: string; error?: string };
+
+      if (data.success) {
+        showSuccess(data.message || 'OAuth connection removed');
+        // Show the "Start OAuth Flow" button again so user can re-authenticate
+        setOauthBrowserFlowAvailable(true);
+      } else {
+        showError(data.error || 'Failed to disconnect OAuth');
+      }
+    } catch (error) {
+      showError(`Disconnect error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setDisconnectingOAuth(false);
     }
   };
 
@@ -652,6 +646,22 @@ const MCPServerFormFields: React.FC<MCPServerFormFieldsProps> = ({
                     </Select>
                   </Form.Item>
 
+                  <Form.Item
+                    label="OAuth Mode"
+                    name="oauth_mode"
+                    initialValue="per_user"
+                    tooltip="Per User: Each user authenticates separately (recommended). Shared: One token for all users."
+                  >
+                    <Select>
+                      <Select.Option value="per_user">
+                        Per User (each user authenticates) - Recommended
+                      </Select.Option>
+                      <Select.Option value="shared">
+                        Shared (single token for all users)
+                      </Select.Option>
+                    </Select>
+                  </Form.Item>
+
                   <Alert
                     message="OAuth 2.1 Auto-Discovery"
                     description={
@@ -684,6 +694,16 @@ const MCPServerFormFields: React.FC<MCPServerFormFieldsProps> = ({
                         onClick={handleStartOAuthFlow}
                       >
                         Start OAuth Flow
+                      </Button>
+                    )}
+                    {authType === 'oauth' && effectiveServerId && !oauthBrowserFlowAvailable && (
+                      <Button
+                        type="default"
+                        danger
+                        loading={disconnectingOAuth}
+                        onClick={handleDisconnectOAuth}
+                      >
+                        Disconnect OAuth
                       </Button>
                     )}
                   </Space>
@@ -720,7 +740,7 @@ const MCPServerFormFields: React.FC<MCPServerFormFieldsProps> = ({
                   <div style={{ marginTop: 8 }}>
                     <Alert
                       type="success"
-                      message={`Connected: ${testResult.toolCount} tools, ${testResult.resourceCount} resources`}
+                      message={`Connected: ${testResult.toolCount} tools, ${testResult.resourceCount} resources, ${testResult.promptCount} prompts`}
                       showIcon
                       style={{ marginBottom: 8 }}
                     />
@@ -823,12 +843,69 @@ const MCPServerFormFields: React.FC<MCPServerFormFieldsProps> = ({
   ];
 
   return (
-    <Collapse
-      ghost
-      defaultActiveKey={['basic']}
-      expandIcon={({ isActive }) => <DownOutlined rotate={isActive ? 180 : 0} />}
-      items={collapseItems}
-    />
+    <>
+      <Collapse
+        ghost
+        defaultActiveKey={['basic']}
+        expandIcon={({ isActive }) => <DownOutlined rotate={isActive ? 180 : 0} />}
+        items={collapseItems}
+      />
+
+      {/* OAuth Callback URL Modal - for two-phase OAuth flow */}
+      <Modal
+        title="Complete OAuth Authentication"
+        open={oauthCallbackModalVisible}
+        onCancel={() => {
+          setOauthCallbackModalVisible(false);
+          setOauthState(null);
+          setOauthCallbackUrl('');
+        }}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => {
+              setOauthCallbackModalVisible(false);
+              setOauthState(null);
+              setOauthCallbackUrl('');
+            }}
+          >
+            Cancel
+          </Button>,
+          <Button
+            key="complete"
+            type="primary"
+            onClick={handleCompleteOAuthFlow}
+            loading={completingOAuth}
+            disabled={!oauthCallbackUrl.trim()}
+          >
+            Complete Authentication
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Typography.Paragraph>
+            After signing in to the OAuth provider, you will be redirected to a page that may show
+            an error (like "This site can't be reached"). This is expected.
+          </Typography.Paragraph>
+
+          <Typography.Paragraph strong>
+            Copy the entire URL from your browser's address bar and paste it below:
+          </Typography.Paragraph>
+
+          <Input.TextArea
+            placeholder="http://127.0.0.1:xxxxx/oauth/callback?code=...&state=..."
+            value={oauthCallbackUrl}
+            onChange={(e) => setOauthCallbackUrl(e.target.value)}
+            rows={3}
+            style={{ fontFamily: 'monospace', fontSize: 12 }}
+          />
+
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            The URL should contain "code=" and "state=" parameters.
+          </Typography.Text>
+        </Space>
+      </Modal>
+    </>
   );
 };
 
@@ -849,6 +926,8 @@ export const MCPServersTable: React.FC<MCPServersTableProps> = ({
   const [transport, setTransport] = useState<'stdio' | 'http' | 'sse'>('stdio');
   const [authType, setAuthType] = useState<'none' | 'bearer' | 'jwt' | 'oauth'>('none');
   const [testing, setTesting] = useState(false);
+  // Track if server was already created by onSaveFirst during OAuth flow
+  const [alreadyCreatedInOAuthFlow, setAlreadyCreatedInOAuthFlow] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     toolCount: number;
@@ -870,7 +949,70 @@ export const MCPServersTable: React.FC<MCPServersTableProps> = ({
     }
   }, [mcpServerById, editingServer]);
 
+  // Save server first for OAuth flow in create mode (returns new server ID)
+  const handleSaveFirstForCreate = async (): Promise<string | null> => {
+    if (!client) return null;
+    try {
+      const values = await form.validateFields();
+      const data: CreateMCPServerInput = {
+        name: values.name,
+        display_name: values.display_name,
+        description: values.description,
+        transport: values.transport,
+        scope: values.scope || 'global',
+        enabled: values.enabled ?? true,
+        source: 'user',
+      };
+
+      if (values.transport === 'stdio') {
+        data.command = values.command;
+        data.args = values.args?.split(',').map((arg: string) => arg.trim()) || [];
+      } else {
+        data.url = values.url;
+      }
+
+      if (values.auth_type && values.auth_type !== 'none') {
+        data.auth = { type: values.auth_type };
+        if (values.auth_type === 'bearer') {
+          data.auth.token = values.auth_token;
+        } else if (values.auth_type === 'jwt') {
+          data.auth.api_url = values.jwt_api_url;
+          data.auth.api_token = values.jwt_api_token;
+          data.auth.api_secret = values.jwt_api_secret;
+        } else if (values.auth_type === 'oauth') {
+          const oauthConfig = extractOAuthConfig(values);
+          Object.assign(data.auth, oauthConfig);
+        }
+      }
+
+      if (values.env) {
+        try {
+          data.env = JSON.parse(values.env);
+        } catch {
+          // Invalid JSON, skip
+        }
+      }
+
+      const result = await client.service('mcp-servers').create(data);
+      setAlreadyCreatedInOAuthFlow(true);
+      return (result as MCPServer).mcp_server_id || null;
+    } catch {
+      return null;
+    }
+  };
+
   const handleCreate = () => {
+    // If server was already created during OAuth flow, just close the modal
+    if (alreadyCreatedInOAuthFlow) {
+      form.resetFields();
+      setCreateModalOpen(false);
+      setTransport('stdio');
+      setAuthType('none');
+      setTestResult(null);
+      setAlreadyCreatedInOAuthFlow(false);
+      return;
+    }
+
     form
       .validateFields()
       .then((values) => {
@@ -975,6 +1117,7 @@ export const MCPServersTable: React.FC<MCPServersTableProps> = ({
             oauth_client_secret?: string;
             oauth_scope?: string;
             oauth_grant_type?: string;
+            oauth_mode?: 'per_user' | 'shared';
           }
         | undefined;
 
@@ -1103,6 +1246,7 @@ export const MCPServersTable: React.FC<MCPServersTableProps> = ({
       formValues.oauth_client_secret = server.auth?.oauth_client_secret;
       formValues.oauth_scope = server.auth?.oauth_scope;
       formValues.oauth_grant_type = server.auth?.oauth_grant_type || 'client_credentials';
+      formValues.oauth_mode = server.auth?.oauth_mode || 'per_user';
     }
 
     form.setFieldsValue(formValues);
@@ -1367,8 +1511,9 @@ export const MCPServersTable: React.FC<MCPServersTableProps> = ({
           setTransport('stdio');
           setAuthType('none');
           setTestResult(null);
+          setAlreadyCreatedInOAuthFlow(false);
         }}
-        okText="Create"
+        okText={alreadyCreatedInOAuthFlow ? 'Done' : 'Create'}
         width={600}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
@@ -1383,6 +1528,7 @@ export const MCPServersTable: React.FC<MCPServersTableProps> = ({
             onTestConnection={() => handleTestConnection()}
             testing={testing}
             testResult={testResult}
+            onSaveFirst={handleSaveFirstForCreate}
           />
         </Form>
       </Modal>
