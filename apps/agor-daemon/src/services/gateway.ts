@@ -134,35 +134,21 @@ export class GatewayService {
       throw new Error('Channel is disabled');
     }
 
-    // 2. Fetch channel owner user (needed for auth context + agentic defaults)
-    const usersService = this.app.service('users') as {
-      get: (id: string) => Promise<User>;
-    };
-    const channelOwner = await usersService.get(channel.agor_user_id);
+    // 2. Look up existing thread mapping
+    const existingMapping = await this.threadMapRepo.findByChannelAndThread(
+      channel.id,
+      data.thread_id
+    );
 
-    // 3. Resolve effective user (Slack user alignment or channel owner fallback)
-    let user = channelOwner;
-    const alignSlackUsers = (channel.config as Record<string, unknown>).align_slack_users === true;
-
-    if (
-      alignSlackUsers &&
-      data.metadata?.slack_user_email &&
-      typeof data.metadata.slack_user_email === 'string'
-    ) {
-      const email = data.metadata.slack_user_email.toLowerCase().trim();
-      const matchedUser = await this.usersRepo.findByEmail(email);
-
-      if (matchedUser) {
+    // 3. Cross-channel ownership check (MUST happen before any sendDebugMessage calls).
+    // If this thread is owned by a DIFFERENT gateway channel on the same daemon,
+    // silently drop the message — we must not interfere with another gateway's thread.
+    // This covers all rejection paths: unmapped thread replies, user alignment failures, etc.
+    if (!existingMapping) {
+      const otherChannelMapping = await this.threadMapRepo.findByThread(data.thread_id);
+      if (otherChannelMapping) {
         console.log(
-          `[gateway] Slack user aligned: ${email} → Agor user ${matchedUser.user_id.substring(0, 8)} (${matchedUser.name || matchedUser.email})`
-        );
-        user = await usersService.get(matchedUser.user_id);
-      } else {
-        console.log(`[gateway] Slack user alignment failed: no Agor user with email ${email}`);
-        this.sendDebugMessage(
-          channel,
-          data.thread_id,
-          `User ${email} doesn't have an Agor account. Ask an admin to create an account with this email, or disable user alignment.`
+          `[gateway] IGNORED: Thread ${data.thread_id} owned by channel ${otherChannelMapping.channel_id.substring(0, 8)}, not ours (${channel.id.substring(0, 8)}). Silently dropping.`
         );
         return {
           success: false,
@@ -172,13 +158,7 @@ export class GatewayService {
       }
     }
 
-    // 4. Look up existing thread mapping
-    const existingMapping = await this.threadMapRepo.findByChannelAndThread(
-      channel.id,
-      data.thread_id
-    );
-
-    // SECURITY FIX: Reject unmapped thread replies that came through without mention.
+    // 4. Reject unmapped thread replies that came through without mention.
     // This prevents unauthorized session creation when users reply to random threads
     // without explicitly mentioning the bot. Only threads where the bot was mentioned
     // (creating a mapping) can continue conversations without mentions.
@@ -196,6 +176,64 @@ export class GatewayService {
         sessionId: '',
         created: false,
       };
+    }
+
+    // 5. Fetch channel owner user (needed for auth context + agentic defaults)
+    const usersService = this.app.service('users') as {
+      get: (id: string) => Promise<User>;
+    };
+    const channelOwner = await usersService.get(channel.agor_user_id);
+
+    // 6. Resolve effective user (Slack user alignment or channel owner fallback)
+    let user = channelOwner;
+    // Check both the channel config and the connector-reported metadata flag.
+    // The metadata flag signals the connector actually attempted alignment for
+    // this specific message (it has access to the runtime config at listen time).
+    const alignSlackUsers =
+      (channel.config as Record<string, unknown>).align_slack_users === true ||
+      data.metadata?.align_slack_users === true;
+
+    if (alignSlackUsers) {
+      if (data.metadata?.slack_user_email && typeof data.metadata.slack_user_email === 'string') {
+        const email = data.metadata.slack_user_email.toLowerCase().trim();
+        const matchedUser = await this.usersRepo.findByEmail(email);
+
+        if (matchedUser) {
+          console.log(
+            `[gateway] Slack user aligned: ${email} → Agor user ${matchedUser.user_id.substring(0, 8)} (${matchedUser.name || matchedUser.email})`
+          );
+          user = await usersService.get(matchedUser.user_id);
+        } else {
+          console.log(`[gateway] Slack user alignment failed: no Agor user with email ${email}`);
+          this.sendDebugMessage(
+            channel,
+            data.thread_id,
+            `User ${email} doesn't have an Agor account. Ask an admin to create an account with this email, or disable user alignment.`
+          );
+          return {
+            success: false,
+            sessionId: '',
+            created: false,
+          };
+        }
+      } else {
+        // Alignment is enabled but email couldn't be resolved (missing
+        // users:read.email scope, Slack API error, or no email on profile).
+        // Reject instead of silently falling back to channel owner.
+        console.log(
+          `[gateway] Slack user alignment failed: could not resolve email for Slack user ${data.user_name ?? 'unknown'} (thread=${data.thread_id})`
+        );
+        this.sendDebugMessage(
+          channel,
+          data.thread_id,
+          "Couldn't resolve your Slack identity. The bot may be missing the `users:read.email` scope, or your Slack profile has no email. Ask an admin to check the bot's scopes."
+        );
+        return {
+          success: false,
+          sessionId: '',
+          created: false,
+        };
+      }
     }
 
     let sessionId: string;
